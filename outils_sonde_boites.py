@@ -19,16 +19,38 @@ Elle n'ouvre aucun message. Elle demande le profil de la boîte, c'est-à-
 dire son adresse et le nombre de messages qu'elle contient, ce qui suffit
 à établir que la porte est ouverte et ne révèle rien du contenu.
 
+Elle nomme enfin le compte de service et son identifiant client. Ce
+n'est pas un secret, c'est un identifiant public, et c'est la seule
+donnée qui permet de retrouver sans hésitation la bonne ligne dans la
+console d'administration quand plusieurs comptes de service y figurent.
+
 Le réglage SONDE_BOITES, dans l'environnement, donne la liste des boîtes
 à sonder, séparées par des virgules. À défaut, la sonde essaie le compte
 impersonné et la boîte de contact. La valeur « non » désactive la sonde.
 """
 
+import json
 import os
 
 from main import mcp, tolerant
 
 from outils_courriel import MESSAGE_DELEGATION, _client_gmail, _normaliser
+
+
+def _identite_du_compte_de_service():
+    """L'adresse et l'identifiant client du compte de service, sans sa clé."""
+    brut = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if not brut:
+        return {"compte_de_service": "(GOOGLE_SERVICE_ACCOUNT_JSON absent)"}
+    try:
+        infos = json.loads(brut)
+    except Exception:  # noqa: BLE001
+        return {"compte_de_service": "(JSON illisible)"}
+    return {
+        "compte_de_service": infos.get("client_email", ""),
+        "identifiant_client": infos.get("client_id", ""),
+        "projet": infos.get("project_id", ""),
+    }
 
 
 def _boites_a_sonder():
@@ -81,19 +103,29 @@ def sonder_boites(boites: str = ""):
 
     Ne lit aucun message. Sert à vérifier en un appel l'état de la
     délégation d'autorité, avant de lancer une campagne d'arbitrage ou
-    après une modification dans la console d'administration.
+    après une modification dans la console d'administration. Renvoie
+    aussi l'identifiant client du compte de service, à reporter dans la
+    console pour retrouver la bonne ligne.
     """
     if boites.strip():
         liste = [_normaliser(b) for b in boites.split(",") if b.strip()]
     else:
         liste = _boites_a_sonder()
-    return {"sondees": [_sonder(b) for b in liste]}
+    rapport = _identite_du_compte_de_service()
+    rapport["sondees"] = [_sonder(b) for b in liste]
+    return rapport
 
 
 # Sonde au démarrage. Enfermée dans un try large : une sonde qui échoue
 # ne doit jamais empêcher le serveur de démarrer, sa seule mission est
 # d'écrire une ligne de journal.
 try:
+    _identite = _identite_du_compte_de_service()
+    print(
+        "[sonde] compte de service " + str(_identite.get("compte_de_service"))
+        + ", identifiant client " + str(_identite.get("identifiant_client")),
+        flush=True,
+    )
     for _boite in _boites_a_sonder():
         _etat = _sonder(_boite)
         if _etat.get("ouverte"):
