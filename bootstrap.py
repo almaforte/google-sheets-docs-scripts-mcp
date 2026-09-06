@@ -10,6 +10,11 @@ importe main, qui enregistre ses outils au passage, ajoute les siens sur
 le même serveur, puis reconstruit l'application ASGI avec le même chemin
 et le même contrôle de clé.
 
+Le même raisonnement s'applique désormais à ce fichier-ci, qui a grossi
+à son tour : tout module nommé « outils_*.py » posé à côté de lui est
+importé automatiquement au démarrage. Ajouter une famille d'outils ne
+demande donc plus de réécrire vingt kilo-octets pour trois lignes.
+
 Attention : la commande de démarrage vit dans les réglages Railway, pas
 dans le Procfile, et elle l'emporte sur lui. Elle doit valoir
 « python bootstrap.py », sans quoi ce fichier n'est jamais exécuté et
@@ -484,6 +489,42 @@ def trash_drive_file(file_id: str):
     }
 
 
+# Chargement des familles d'outils posées à côté de ce fichier.
+#
+# Tout module nommé « outils_*.py » dans le même dossier est importé au
+# démarrage, ce qui suffit à enregistrer ses outils sur le même serveur
+# MCP. Ajouter une famille d'outils ne demande donc plus de réécrire ce
+# fichier de vingt kilo-octets pour trois lignes, manipulation qui est
+# exactement celle qui finit par tronquer un fichier sans prévenir.
+#
+# Un module qui échoue à l'import ne fait pas tomber le serveur : il est
+# nommé dans le journal de démarrage, et les autres outils restent
+# servis. Un serveur amputé d'une famille d'outils reste utile ; un
+# serveur qui ne démarre pas ne l'est pas.
+def _charger_modules_outils():
+    import glob
+    import importlib
+
+    dossier = os.path.dirname(os.path.abspath(__file__))
+    charges, echoues = [], []
+    for chemin in sorted(glob.glob(os.path.join(dossier, "outils_*.py"))):
+        nom = os.path.splitext(os.path.basename(chemin))[0]
+        try:
+            importlib.import_module(nom)
+            charges.append(nom)
+        except Exception as exc:  # noqa: BLE001
+            echoues.append(nom)
+            print(
+                "[bootstrap] module " + nom + " NON chargé : "
+                + type(exc).__name__ + " " + str(exc)[:300],
+                flush=True,
+            )
+    return charges, echoues
+
+
+_modules_charges, _modules_echoues = _charger_modules_outils()
+
+
 app = mcp.http_app(
     path=os.environ.get("MCP_PATH", "/mcp"),
     middleware=[Middleware(ApiKeyMiddleware)],
@@ -542,6 +583,12 @@ if not _noms_outils:
 print(
     "[bootstrap] point d'entrée actif, fastmcp " + str(_version) +
     ", outils exposés : " + (str(len(_noms_outils)) if _noms_outils else "inconnu"),
+    flush=True,
+)
+print(
+    "[bootstrap] modules d'outils chargés : "
+    + (", ".join(_modules_charges) if _modules_charges else "aucun")
+    + (" | en échec : " + ", ".join(_modules_echoues) if _modules_echoues else ""),
     flush=True,
 )
 print("[bootstrap] attributs candidats : " + ", ".join(_pistes), flush=True)
