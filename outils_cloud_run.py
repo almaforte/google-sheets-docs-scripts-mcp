@@ -33,6 +33,15 @@ vides sans erreur, ce qui est la panne la plus trompeuse de la famille.
 Cloud Scheduler impose en plus la region de l'application App Engine du
 projet quand il en existe une, d'ou l'outil cloud_planificateur_regions,
 a appeler avant de creer une planification dans un projet neuf.
+
+Secrets
+
+Un secret se pose de deux facons, et les confondre donne un travail qui
+demarre normalement puis echoue a la premiere lecture, sans message
+parlant. Une cle ordinaire pose une VARIABLE d'environnement. Une cle qui
+commence par une barre oblique monte le secret en FICHIER a ce chemin,
+ce qu'attend toute bibliotheque Google a qui l'on passe un chemin de
+compte de service. Voir _env_et_volumes.
 """
 
 import base64
@@ -127,31 +136,94 @@ def _attendre_operation_run(region: str, operation: dict, secondes: int = 300) -
     return operation
 
 
-def _env_liste(variables, secrets) -> list:
-    """Traduit deux dictionnaires simples en liste d'env Cloud Run v2.
+def _nom_volume(secret: str) -> str:
+    """Nom de volume accepte par Cloud Run : minuscules, chiffres, tirets."""
+    propre = "".join(c if (c.isalnum() or c == "-") else "-" for c in secret.lower())
+    return ("secret-" + propre)[:63].strip("-")
+
+
+def _env_et_volumes(variables, secrets):
+    """Traduit deux dictionnaires simples en env, volumes et montages.
 
     variables : {"CLE": "valeur"} en clair.
-    secrets   : {"CLE": "nom_du_secret"} ou {"CLE": "nom_du_secret:3"},
-                lus dans Secret Manager au demarrage de la tache.
+
+    secrets : deux formes coexistent, distinguees par la forme de la cle.
+
+        {"MOT_DE_PASSE": "medionline-mot-de-passe"} pose une VARIABLE
+        d'environnement, lue dans Secret Manager au demarrage de la tache.
+
+        {"/secrets/service-account.json": "medionline-compte-de-service"}
+        monte le secret en FICHIER a ce chemin exact. C'est la forme qu'il
+        faut des qu'un programme attend un CHEMIN, ce que fait toute
+        bibliotheque Google a qui l'on passe un compte de service. Poser un
+        chemin en variable d'environnement produit un travail qui se cree
+        sans erreur, demarre, puis echoue a la premiere ouverture du
+        fichier : panne muette a eviter, constatee le 08.09.2026 sur
+        medionline-factures-lca.
+
+    Dans les deux formes, « :3 » ajoute a la valeur fige une version du
+    secret ; sans precision c'est « latest ».
+
+    Cloud Run monte un volume par secret, donc deux secrets differents ne
+    peuvent pas partager un meme dossier de montage : le cas leve une
+    erreur explicite plutot que d'ecraser silencieusement un montage.
     """
-    sortie = []
+    env = []
+    volumes = {}
+    montages = {}
+
     for cle, valeur in (variables or {}).items():
-        sortie.append({"name": str(cle), "value": str(valeur)})
+        env.append({"name": str(cle), "value": str(valeur)})
+
     for cle, reference in (secrets or {}).items():
+        cle = str(cle)
         texte = str(reference)
         secret, _, version = texte.partition(":")
-        sortie.append(
-            {
-                "name": str(cle),
-                "valueSource": {
-                    "secretKeyRef": {
-                        "secret": secret,
-                        "version": version or "latest",
-                    }
-                },
-            }
+        version = version or "latest"
+
+        if not cle.startswith("/"):
+            env.append(
+                {
+                    "name": cle,
+                    "valueSource": {
+                        "secretKeyRef": {"secret": secret, "version": version}
+                    },
+                }
+            )
+            continue
+
+        dossier, _, fichier = cle.rpartition("/")
+        dossier = dossier or "/"
+        if not fichier:
+            raise ValueError(
+                "Chemin de secret sans nom de fichier : " + cle
+            )
+
+        occupant = montages.get(dossier)
+        if occupant and occupant != secret:
+            raise ValueError(
+                "Deux secrets differents montes dans le meme dossier "
+                + dossier
+                + " : "
+                + occupant
+                + " et "
+                + secret
+                + ". Cloud Run monte un volume par secret, donc un dossier"
+                + " de montage par secret."
+            )
+        montages[dossier] = secret
+
+        volume = volumes.setdefault(
+            secret,
+            {"name": _nom_volume(secret), "secret": {"secret": secret, "items": []}},
         )
-    return sortie
+        volume["secret"]["items"].append({"path": fichier, "version": version})
+
+    liste_montages = [
+        {"name": _nom_volume(secret), "mountPath": dossier}
+        for dossier, secret in montages.items()
+    ]
+    return env, list(volumes.values()), liste_montages
 
 
 def _resume_travail(travail: dict) -> dict:
@@ -167,6 +239,9 @@ def _resume_travail(travail: dict) -> dict:
         "delai": modele.get("timeout", ""),
         "essais": modele.get("maxRetries"),
         "variables": [e.get("name") for e in (premier.get("env") or [])],
+        "fichiers_montes": [
+            m.get("mountPath") for m in (premier.get("volumeMounts") or [])
+        ],
         "cree_le": travail.get("createTime", ""),
         "maj_le": travail.get("updateTime", ""),
         "derniere_execution": (travail.get("latestCreatedExecution") or {}).get("name", ""),
@@ -383,8 +458,13 @@ def cloud_run_creer_ou_maj_travail(
     Un travail, et non un service : il tourne, fait son ouvrage et
     s'arrete, ce qui est la forme juste pour un robot planifie.
 
-    secrets : {"MOT_DE_PASSE": "medionline-mot-de-passe"} lit la version
-        « latest » du secret ; ajouter « :3 » pour figer une version.
+    secrets : la forme de la CLE decide de la pose.
+        {"MOT_DE_PASSE": "medionline-mot-de-passe"} pose une variable
+            d'environnement.
+        {"/secrets/service-account.json": "medionline-compte-de-service"}
+            monte le secret en FICHIER a ce chemin, ce qu'il faut des
+            qu'un programme attend un chemin plutot qu'une valeur.
+        Ajouter « :3 » a la valeur fige une version, sinon « latest ».
     compte_de_service : identite sous laquelle la tache tourne. Sans lui,
         Cloud Run prend le compte Compute par defaut du projet.
     essais vaut 0 par defaut : un robot qui echoue doit se voir, pas se
@@ -401,15 +481,20 @@ def cloud_run_creer_ou_maj_travail(
         conteneur["args"] = [str(a) for a in arguments]
     if commande:
         conteneur["command"] = [str(c) for c in commande]
-    env = _env_liste(variables, secrets)
+
+    env, volumes, montages = _env_et_volumes(variables, secrets)
     if env:
         conteneur["env"] = env
+    if montages:
+        conteneur["volumeMounts"] = montages
 
     modele_tache = {
         "containers": [conteneur],
         "timeout": str(int(delai_secondes)) + "s",
         "maxRetries": int(essais),
     }
+    if volumes:
+        modele_tache["volumes"] = volumes
     if compte_de_service:
         modele_tache["serviceAccount"] = compte_de_service
 
