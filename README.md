@@ -95,12 +95,12 @@ et une délégation de domaine n'y a aucun sens. Le périmètre réel du
 serveur est donc exactement ce qu'IAM lui accorde, et se révoque en une
 ligne.
 
-**Amorçage, une seule fois.** Un compte de service ne détient rien tant
-que personne ne lui a rien donné, et cet octroi ne peut pas passer par
-l'API puisque c'est lui qui ouvre l'API. Rôles à poser sur
+**Amorçage, fait le 08.09.2026.** Un compte de service ne détient rien
+tant que personne ne lui a rien donné, et cet octroi ne peut pas passer
+par l'API puisque c'est lui qui ouvre l'API. Rôles posés sur
 `claude-sheets@claude-multiple-mails.iam.gserviceaccount.com`, au niveau
-de l'organisation plutôt que d'un projet, faute de quoi chaque nouveau
-projet demandera un octroi de plus :
+de l'organisation almaval.ch plutôt que d'un projet, faute de quoi
+chaque nouveau projet aurait demandé un octroi de plus :
 
 - `roles/browser`
 - `roles/serviceusage.serviceUsageAdmin`
@@ -108,8 +108,34 @@ projet demandera un octroi de plus :
 - `roles/iam.serviceAccountAdmin`
 - `roles/monitoring.viewer`
 
-`identite_cloud` sert de témoin : tant que les rôles manquent, il
-renvoie zéro projet visible et le message d'erreur exact de Google.
+`roles/resourcemanager.projectCreator` a été volontairement laissé de
+côté : le serveur pilote les projets existants, il n'en fabrique pas.
+
+### Le piège du projet porteur
+
+Les rôles posés, Service Usage répondait et Cloud Resource Manager
+refusait encore, par un 403 dont le message ne parlait pas de droits :
+« API has not been used in project 341135609927 before or it is
+disabled ». Chaque appel est facturé au projet qui porte l'identité
+appelante, ici `claude-multiple-mails`, et une API d'administration doit
+donc y être activée même quand la cible est un tout autre projet.
+
+Règle de lecture : un 403 qui nomme un numéro de projet et le mot
+`disabled` est un défaut d'activation sur le projet porteur, jamais un
+défaut de rôle. Chercher du côté d'IAM fait perdre du temps.
+
+`outils_cloud_sonde.py` s'en charge seul. À chaque démarrage il vérifie
+que `cloudresourcemanager`, `iam`, `monitoring` et `cloudbilling` sont
+activées sur le projet porteur, active ce qui manque, puis écrit dans le
+journal ce que le compte voit réellement. En pratique il n'active rien,
+sauf le jour où quelque chose a bougé.
+
+Ce fichier sert aussi de contournement à un défaut observé le
+08.09.2026 : le serveur exposait 81 outils et le client en voyait encore
+61, la liste d'un connecteur pouvant rester figée côté plateforme bien
+après le déploiement. Les journaux Railway, eux, se lisent sans passer
+par le connecteur. Le jour où ce décalage disparaît, `identite_cloud`
+rend le même service à la demande et la sonde peut être supprimée.
 
 **Une clé privée ne se promène pas.**
 `cloud_creer_cle_compte_de_service` renvoie la clé en clair et exige
@@ -123,9 +149,9 @@ désactivé** et le serveur devient ouvert à qui connaît l'URL, avec
 l'identité d'un compte du domaine. Elle doit toujours être posée.
 
 Le volet Cloud élargit ce que vaut cette clé : elle ouvre désormais
-aussi ce qu'IAM accorde au compte de service. Raison de plus pour ne
-jamais la laisser vide, et pour ne donner au compte de service que les
-rôles réellement utiles.
+aussi ce qu'IAM accorde au compte de service, sur toute l'organisation.
+Raison de plus pour ne jamais la laisser vide, et pour ne donner au
+compte de service que les rôles réellement utiles.
 
 ## À faire
 
