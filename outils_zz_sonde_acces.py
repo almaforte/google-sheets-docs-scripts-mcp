@@ -14,8 +14,8 @@ envoie chercher la panne dans IAM ou elle n'est pas. Cette sonde dit, a
 chaque demarrage et dans le journal Railway, si les trois sont en place,
 sans avoir besoin qu'un client voie les outils correspondants.
 
-Elle ne lit que des listes, n'ecrit rien, et n'interrompt jamais le
-demarrage : toute erreur est imprimee et avalee.
+Elle ne lit que des listes et teste des permissions, n'ecrit rien, et
+n'interrompt jamais le demarrage : toute erreur est imprimee et avalee.
 """
 
 COMPTE_DE_FACTURATION = "billingAccounts/012434-D87726-03EACE"
@@ -68,6 +68,37 @@ def _sonder_facturation() -> None:
         )
     except Exception as exc:  # noqa: BLE001
         _ligne("budgets REFUSES : " + str(exc)[:300])
+
+    # Lire ne dit pas si l'on peut ecrire. testIamPermissions le dit sans
+    # rien creer, ce qui evite d'apprendre le refus au moment ou l'on
+    # voulait vraiment poser un budget.
+    try:
+        permissions = [
+            "billing.accounts.get",
+            "billing.budgets.get",
+            "billing.budgets.create",
+            "billing.budgets.update",
+            "billing.resourceAssociations.create",
+        ]
+        accordees = (
+            _api("cloudbilling", "v1")
+            .billingAccounts()
+            .testIamPermissions(
+                resource=COMPTE_DE_FACTURATION, body={"permissions": permissions}
+            )
+            .execute()
+            .get("permissions", [])
+        )
+        manquantes = [nom for nom in permissions if nom not in accordees]
+        _ligne(
+            "facturation, permissions accordees : " + (", ".join(accordees) or "aucune")
+        )
+        _ligne(
+            "facturation, permissions manquantes : "
+            + (", ".join(manquantes) or "aucune, ecriture possible")
+        )
+    except Exception as exc:  # noqa: BLE001
+        _ligne("facturation, test des permissions REFUSE : " + str(exc)[:300])
 
 
 def _sonder_analytics() -> None:
