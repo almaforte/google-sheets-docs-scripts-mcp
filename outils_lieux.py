@@ -102,6 +102,10 @@ ROUGE_DOUX = "#cc0000"
 
 LIBELLE_ETAGE = "Étage"
 LIBELLE_NUMERO = "Numéro du bureau"
+# La date de la Planification vit en D1 : A1 porte le titre, qui deborde
+# sur B1 et C1 laissees vides ; C1 est couverte par le logo flottant.
+CELLULE_DATE = "D1"
+COLONNE_DATE = 3
 # Ce qui signale une attribution encore incertaine dans la remarque
 MOTS_INCERTAINS = "incertain|confirmer|inconnu"
 
@@ -1675,7 +1679,7 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     """Formule d'une cellule de Planification, en francais, sans LET.
 
     Lit le registre Attributions par intitule de colonne, jamais par
-    lettre, et retient les lignes vivantes a la date choisie en B1 :
+    lettre, et retient les lignes vivantes a la date choisie en D1 :
     Active ou Confirmee, ou Proposee avec une date de debut, debut au
     plus tard a la date, fin au plus tot a la date, sans les presences
     administratives. Plusieurs personnes sont jointes par une virgule.
@@ -1699,15 +1703,15 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
         + ';' + col("Demi-journée") + '="' + demi + '"'
         + ';(' + col("Statut") + '="Active")+(' + col("Statut") + '="Confirmée")+(('
         + col("Statut") + '="Proposée")*(' + col("Date de début") + '<>""))'
-        + ';(' + col("Date de début") + '="")+(' + col("Date de début") + '<=$B$1)'
-        + ';(' + col("Date de fin") + '="")+(' + col("Date de fin") + '>=$B$1)'
+        + ';(' + col("Date de début") + '="")+(' + col("Date de début") + '<=$D$1)'
+        + ';(' + col("Date de fin") + '="")+(' + col("Date de fin") + '>=$D$1)'
         + ';ESTERREUR(CHERCHE("bloc ADMIN";' + col("Remarque") + '))'
         + '));""))'
     )
 
 
 def _generer_planification(date_iso: str = "", sujet: str = ""):
-    """Planification vivante : la date se choisit en B1, la grille suit.
+    """Planification vivante : la date se choisit en D1, la grille suit.
 
     Demande d'Alberto du 13.09.2026 : une cellule de date, et tout le
     tableau se met a jour pour montrer les bureaux vides ou pris a cette
@@ -1716,7 +1720,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
     et ne touche a la date que si on la lui donne ou si elle est vide.
 
     Les demi-journees n'y sont pas fusionnees : une fusion est figee, et
-    elle mentirait des que la date de B1 change.
+    elle mentirait des que la date de D1 change.
     """
     grille = _lire(ONGLET_GRILLE, sujet=sujet)
     largeur = max((len(l) for l in grille), default=0)
@@ -1725,7 +1729,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
         return {"onglet": ONGLET_PLANIFICATION, "date": "", "cellules_occupees": 0, "lignes": 0}
 
     existante = _lire(ONGLET_PLANIFICATION, sujet=sujet)
-    date_en_place = _date(_cellule(existante[0], 1)) if existante else ""
+    date_en_place = _date(_cellule(existante[0], COLONNE_DATE)) if existante else ""
     date_choisie = date_iso or date_en_place or _premier_du_mois_suivant()
 
     formules = []  # (plage A1, lignes de formules) par bloc
@@ -1754,19 +1758,19 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
         formules.append((_lettre(c0) + str(bloc["premiere_ligne"] + 1) + ":" + _lettre(c1)
                          + str(bloc["premiere_ligne"] + len(lignes_bloc)), lignes_bloc))
 
-    sortie[0][0] = ""
-    sortie[0][1] = ""
+    sortie[0] = [""] * max(len(sortie[0]), COLONNE_DATE + 1)
     _ecrire_grille(ONGLET_PLANIFICATION, sortie, sujet=sujet)
-    tete = [['="Planification au "&TEXTE($B$1;"dd.mm.yyyy")', _jolie_date(date_choisie)]]
-    _ecrire(ONGLET_PLANIFICATION, "A1:B1", tete, sujet=sujet, mode="USER_ENTERED")
+    _ecrire(ONGLET_PLANIFICATION, "A1", [['="Planification au "&TEXTE($D$1;"dd.mm.yyyy")']],
+            sujet=sujet, mode="USER_ENTERED")
+    _ecrire(ONGLET_PLANIFICATION, CELLULE_DATE, [[_jolie_date(date_choisie)]], sujet=sujet, mode="USER_ENTERED")
     for plage, lignes_bloc in formules:
         _ecrire(ONGLET_PLANIFICATION, plage, lignes_bloc, sujet=sujet, mode="USER_ENTERED")
 
     poses = sum(1 for occupants in _actives_au(date_choisie, sujet=sujet).values() if occupants)
     _journaliser([[_maintenant(), ONGLET_PLANIFICATION, "Génération", date_choisie, "", str(poses), "Terminé",
-                   "grille par formules, date en B1, cellules occupées au " + _jolie_date(date_choisie)]], sujet=sujet)
+                   "grille par formules, date en D1, cellules occupées au " + _jolie_date(date_choisie)]], sujet=sujet)
     return {"onglet": ONGLET_PLANIFICATION, "date": date_choisie, "cellules_occupees": poses,
-            "lignes": len(sortie), "date_en_B1": True}
+            "lignes": len(sortie), "date_en_D1": True}
 
 
 @mcp.tool()
@@ -1853,7 +1857,7 @@ def lieux_vue_actuelle(date: str = "", sujet: str = ""):
 def lieux_planification(date: str = "", sujet: str = ""):
     """Reconstruit la Planification : le standard a une date choisie.
 
-    La date vit en B1 de l'onglet et se change a la main, la grille suit
+    La date vit en D1 de l'onglet et se change a la main, la grille suit
     par formules. Sans date ici, la date en place est gardee ; a defaut,
     le premier jour du mois suivant. C'est la grille qui montre les
     arrivees et les departs deja decides dans le registre.
@@ -2586,7 +2590,7 @@ def _mesures_grille(grille, longueurs=None):
         ignorees.add((r_entete, bloc["colonne_demi"]))
         mots = str(_cellule(grille[r_entete], bloc["colonne_demi"])).split()
         c = bloc["colonne_demi"]
-        longueurs[c] = max(longueurs.get(c, 0), max((len(m) for m in mots), default=0))
+        longueurs[c] = max(longueurs.get(c, 0), max((_longueur_capitales(m) for m in mots), default=0))
     for r, ligne in enumerate(grille):
         if r == 0:
             continue
@@ -2595,6 +2599,12 @@ def _mesures_grille(grille, longueurs=None):
                 continue
             longueurs[c] = max(longueurs.get(c, 0), len(str(_cellule(ligne, c))))
     return longueurs
+
+
+def _longueur_capitales(mot):
+    """Longueur equivalente d'un mot ecrit en capitales grasses, plus
+    larges que les minuscules d'un nom : un tiers de plus."""
+    return int(len(mot) * 1.3 + 0.999)
 
 
 def _largeur_pixels(longueur):
@@ -2610,7 +2620,7 @@ def _hauteurs_entetes(grille, longueurs):
         r = bloc["ligne_entete"]
         nom = str(_cellule(grille[r], bloc["colonne_demi"])).strip()
         largeur = _largeur_pixels(longueurs.get(bloc["colonne_demi"], 0))
-        if nom and 12 + 4.7 * len(nom) > largeur:
+        if nom and 12 + 4.7 * _longueur_capitales(nom) > largeur:
             lignes.append(r)
     return lignes
 
@@ -3058,11 +3068,20 @@ def lieux_poser_la_charte(sujet: str = ""):
             }]
             protection["description"] = "Registre écrit par le moteur ; seules les deux dates se saisissent"
         if titre == ONGLET_PLANIFICATION:
-            # La date en B1 se saisit : cellule jaune, format de date, validation bloquante.
+            # La date en D1 se saisit : cellule jaune, format de date, validation bloquante.
             cellule_date = {"sheetId": proprietes[titre]["sheetId"], "startRowIndex": 0, "endRowIndex": 1,
-                            "startColumnIndex": 1, "endColumnIndex": 2}
+                            "startColumnIndex": COLONNE_DATE, "endColumnIndex": COLONNE_DATE + 1}
             protection["unprotectedRanges"] = [cellule_date]
-            protection["description"] = "Grille par formules ; seule la date en B1 se saisit"
+            protection["description"] = "Grille par formules ; seule la date en D1 se saisit"
+            # Les cellules qui precedent la date redeviennent blanches et
+            # sans validation : la date a vecu en B1 avant le 13.09.2026.
+            avant_date = {"sheetId": proprietes[titre]["sheetId"], "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": COLONNE_DATE}
+            requetes.append({"repeatCell": {
+                "range": avant_date,
+                "cell": {"userEnteredFormat": {"backgroundColor": _rvb(BLANC)}},
+                "fields": "userEnteredFormat.backgroundColor"}})
+            requetes.append({"setDataValidation": {"range": avant_date}})
             requetes.append({"repeatCell": {
                 "range": cellule_date,
                 "cell": {"userEnteredFormat": {
