@@ -1643,7 +1643,7 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
         return 'INDEX(' + registre + ';0;EQUIV("' + nom + '";' + entetes + ';0))'
 
     return (
-        '=ARRAYFORMULA(SIERREUR(JOINDRE(", ";VRAI;FILTER(' + col("Collaborateur")
+        '=ARRAYFORMULA(SIERREUR(TEXTJOIN(", ";VRAI;FILTER(' + col("Collaborateur")
         + ';' + col("Bâtiment") + '=' + site_ref
         + ';' + col("Bureau") + '=' + bureau_ref
         + ';' + col("Jour") + '="' + jour + '"'
