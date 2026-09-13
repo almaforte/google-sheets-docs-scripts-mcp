@@ -69,7 +69,10 @@ ONGLET_LISTES = "Listes"
 ONGLET_JOURNAL = "Journal"
 ONGLET_DEMANDES = "Demandes"
 ONGLET_PATIENTS = "Occupation bureaux"
-ONGLET_EFFECTIF = "Effectif"
+# Le registre RH que lit le distributeur des groupes : ses douze colonnes
+# de demi-journees portent le « Lieu de travail » de chaque engagement.
+ONGLET_EFFECTIF = "Registre - Engagements"
+ETATS_ENGAGEMENT_VIVANTS = ("En cours", "À venir")
 
 # Anciens onglets, retires par la migration du 13.09.2026
 ONGLET_MOUVEMENTS = "Mouvements"
@@ -1660,10 +1663,15 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
 @mcp.tool()
 @tolerant
 def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
-    """Ecrit le site de chaque demi-journee dans l'onglet Effectif.
+    """Ecrit le site de chaque demi-journee dans Registre - Engagements.
 
-    Une personne presente dans l'effectif mais absente du registre voit
-    ses colonnes laissees en l'etat, jamais videes.
+    C'est la que le distributeur des groupes lit le « Lieu de travail »
+    de chaque demi-journee ; jusqu'au 13.09.2026 il le transcrivait
+    lui-meme depuis l'ancienne grille publiee. Seuls les engagements
+    En cours ou À venir sont touches. Une personne presente dans le
+    registre RH mais absente des attributions voit ses colonnes laissees
+    en l'etat, jamais videes. Les presences administratives du bloc
+    ADMIN comptent ici : elles disent bien ou la personne travaille.
     """
     registre = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)
     entetes = registre[0]
@@ -1695,6 +1703,10 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
     effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
     tetes = effectif[0]
     i_nom = _colonne(tetes, "Nom prénom")
+    try:
+        i_etat = _colonne(tetes, "État de l'engagement")
+    except RuntimeError:
+        i_etat = None
     creneaux = []
     for jour in JOURS:
         for demi in ("matin", "après-midi"):
@@ -1708,6 +1720,8 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
     for r, ligne in enumerate(effectif[1:], start=2):
         nom = _cellule(ligne, i_nom)
         if not nom:
+            continue
+        if i_etat is not None and _cellule(ligne, i_etat) not in ETATS_ENGAGEMENT_VIVANTS:
             continue
         connus = par_personne.get(_normaliser(nom))
         if not connus:
