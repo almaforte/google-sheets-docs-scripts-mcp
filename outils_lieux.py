@@ -41,6 +41,7 @@ leur moteur. Le site par demi-journee est rendu a l'effectif, et c'est
 une regle geographique du moteur des groupes qui doit s'en servir.
 """
 
+import colorsys
 import datetime
 import re
 import shlex
@@ -95,6 +96,7 @@ SAUMON = "#ffe6dd"
 VIOLET = "#efebf7"
 BLANC = "#ffffff"
 ROUGE = "#ff0000"
+GRIS = "#666666"
 
 # Pastels « clair 3 » de Google, repris tels quels, pour les valeurs non
 # nominatives d'une cellule de la grille.
@@ -1169,6 +1171,10 @@ def lieux_preparer(sujet: str = ""):
         ], sujet=sujet)
         fait.append("Heures des demi-journées posées en J1:L3")
 
+    # Une couleur par collaborateur, posee une fois pour toutes
+    couleurs = _couleurs_personnes(sujet=sujet)
+    fait.append("Couleurs de collaborateurs : " + str(len(couleurs)))
+
     return {"prepare": True, "actions": fait or ["Rien à faire, tout était déjà en place"]}
 
 
@@ -1622,6 +1628,9 @@ def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
     else:
         sortie[0][0] = titre
     _ecrire_grille(onglet, sortie, sujet=sujet)
+    fusions = _fusions_demi_journees(_onglets(sujet=sujet)[onglet]["sheetId"], sortie)
+    if fusions:
+        _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": fusions}).execute()
     _journaliser([[_maintenant(), onglet, "Génération", date_iso, "", str(poses), "Terminé",
                    "cellules occupées au " + _jolie_date(date_iso)]], sujet=sujet)
     return {"onglet": onglet, "date": date_iso, "cellules_occupees": poses, "lignes": len(sortie)}
@@ -1665,6 +1674,9 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
     date. Chaque cellule de bureau porte une formule qui lit le registre
     Attributions ; le moteur ne repose que la geometrie et les formules,
     et ne touche a la date que si on la lui donne ou si elle est vide.
+
+    Les demi-journees n'y sont pas fusionnees : une fusion est figee, et
+    elle mentirait des que la date de B1 change.
     """
     grille = _lire(ONGLET_GRILLE, sujet=sujet)
     largeur = max((len(l) for l in grille), default=0)
@@ -1786,9 +1798,10 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
         valueInputOption="RAW",
         body={"values": normalise},
     ).execute()
-    _feuilles(sujet).batchUpdate(
-        spreadsheetId=ID_PATIENTS, body={"requests": _requetes_charte_grille(sid, normalise, VIOLET)}
-    ).execute()
+    couleurs = _couleurs_personnes(sujet=sujet)
+    _feuilles(sujet).batchUpdate(spreadsheetId=ID_PATIENTS, body={"requests":
+        _requetes_charte_bureaux(sid, normalise, couleurs)
+        + _fusions_demi_journees(sid, normalise)}).execute()
 
     _journaliser([[_maintenant(), "Publication", "Copie vers Almaval - Patients", ONGLET_PATIENTS, "",
                    str(len(normalise)), "Terminé", "vue du " + _aujourdhui()]], sujet=sujet)
@@ -2303,61 +2316,183 @@ def lieux_retablir_journee(identifiant_bureau: str, date: str, sujet: str = ""):
 
 # --------------------------------------------------- charte et protections
 
-def _requetes_charte_grille(identifiant: int, grille, famille: str):
-    """Requetes de charte d'une grille large, dans n'importe quel classeur.
+def _pastel(rang: int) -> str:
+    """Pastel de la gamme « clair 3 » de Google, meme intensite pour tous.
 
-    Quadrillage masque, Manjari 7 teal partout, titre en A1 a gauche et
-    en gras, en-tete doree et bande alternee blanc et famille sur les
-    douze lignes de chaque bloc, couleurs des types d'occupation.
+    La teinte avance de l'angle d'or, ce qui eloigne deux rangs voisins ;
+    la clarte ne bouge jamais, seule la saturation change par cran. Toutes
+    les couleurs ont donc la meme force, comme la troisieme ligne des
+    couleurs standard, et la gamme se prolonge au-dela de ses dix teintes.
     """
-    texte_commun = {"fontFamily": POLICE, "fontSize": TAILLE, "foregroundColor": _rvb(TEAL)}
-    masque_texte = ("userEnteredFormat.textFormat.fontFamily,"
-                    "userEnteredFormat.textFormat.fontSize,"
-                    "userEnteredFormat.textFormat.foregroundColor")
-    requetes = [
-        {"updateSheetProperties": {
-            "properties": {"sheetId": identifiant, "gridProperties": {"hideGridlines": True, "frozenRowCount": 0}},
-            "fields": "gridProperties.hideGridlines,gridProperties.frozenRowCount",
-        }},
-        {"repeatCell": {
-            "range": {"sheetId": identifiant},
-            "cell": {"userEnteredFormat": {
-                "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
-                "textFormat": dict(texte_commun, bold=False),
-            }},
-            "fields": ("userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,"
-                       "userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.bold," + masque_texte),
-        }},
-        {"repeatCell": {
-            "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 1},
-            "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT", "textFormat": dict(texte_commun, bold=True)}},
-            "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold," + masque_texte,
-        }},
-    ]
+    teinte = ((rang * 137.508) % 360) / 360.0
+    saturation = (0.95, 0.70, 0.52, 0.40)[rang % 4]
+    r, v, b = colorsys.hls_to_rgb(teinte, 0.87, saturation)
+    return "#%02x%02x%02x" % (round(r * 255), round(v * 255), round(b * 255))
+
+
+def _couleurs_personnes(sujet: str = ""):
+    """Une couleur par collaborateur, ecrite une fois dans Listes.
+
+    La couleur vit dans la colonne Couleur de l'onglet Listes : une
+    personne garde ainsi la sienne sur toutes les grilles et d'une annee
+    a l'autre, et l'ajout d'un nom au milieu de la liste ne decale plus
+    personne. Le moteur n'attribue que les couleurs manquantes.
+    """
+    listes = _lire(ONGLET_LISTES, sujet=sujet)
+    if not listes:
+        return {}
+    tetes = list(listes[0])
+    try:
+        i_couleur = _colonne(tetes, "Couleur")
+    except RuntimeError:
+        i_couleur = len(tetes)
+        _ajuster_taille(ONGLET_LISTES, max(len(listes), 2), i_couleur + 1, sujet=sujet)
+        _ecrire(ONGLET_LISTES, _lettre(i_couleur) + "1", [["Couleur"]], sujet=sujet)
+
+    couleurs, prises, manquants = {}, set(), []
+    for r, ligne in enumerate(listes[1:], start=2):
+        nom = _cellule(ligne, 0)
+        if not nom:
+            continue
+        valeur = str(_cellule(ligne, i_couleur) or "").strip().lower()
+        if len(valeur) == 7 and valeur.startswith("#"):
+            couleurs[nom] = valeur
+            prises.add(valeur)
+        else:
+            manquants.append((r, nom))
+
+    if manquants:
+        rang, ecritures = 0, []
+        for r, nom in manquants:
+            couleur = _pastel(rang)
+            while couleur in prises:
+                rang += 1
+                couleur = _pastel(rang)
+            rang += 1
+            prises.add(couleur)
+            couleurs[nom] = couleur
+            ecritures.append({
+                "range": "'" + ONGLET_LISTES + "'!" + _lettre(i_couleur) + str(r),
+                "values": [[couleur]],
+            })
+        _feuilles(sujet).values().batchUpdate(
+            spreadsheetId=ID_LIEUX,
+            body={"valueInputOption": "RAW", "data": ecritures},
+        ).execute()
+    return couleurs
+
+
+def _plages_occupant(identifiant: int, grille):
+    """Plages des cellules d'occupant d'une grille large, bloc par bloc."""
     plages = []
+    for bloc in _blocs(grille):
+        colonnes = [c for c, _ in bloc["bureaux"]]
+        if colonnes:
+            plages.append({
+                "sheetId": identifiant,
+                "startRowIndex": bloc["premiere_ligne"],
+                "endRowIndex": bloc["premiere_ligne"] + 12,
+                "startColumnIndex": min(colonnes),
+                "endColumnIndex": max(colonnes) + 1,
+            })
+    return plages
+
+
+def _fusions_demi_journees(identifiant: int, grille):
+    """Fusionne matin et apres-midi quand la valeur est la meme.
+
+    Demande d'Alberto du 13.09.2026 : quand une personne tient la journee
+    entiere, son nom ne s'ecrit qu'une fois. La fusion garde la valeur du
+    haut et efface celle du bas : elle ne se pose donc qu'apres l'ecriture,
+    et jamais sur Propositions, ou une personne saisit chaque demi-journee.
+    """
+    requetes = []
+    for bloc in _blocs(grille):
+        for colonne, _ in bloc["bureaux"]:
+            for k in range(6):
+                r = bloc["premiere_ligne"] + 2 * k
+                if r + 1 >= len(grille):
+                    break
+                haut = str(_cellule(grille[r], colonne)).strip()
+                bas = str(_cellule(grille[r + 1], colonne)).strip()
+                if haut and haut == bas:
+                    requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
+                        "sheetId": identifiant, "startRowIndex": r, "endRowIndex": r + 2,
+                        "startColumnIndex": colonne, "endColumnIndex": colonne + 1,
+                    }}})
+    return requetes
+
+
+def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = True):
+    """Charte des grilles d'occupation, arretee avec Alberto le 13.09.2026.
+
+    Plus d'alternance de lignes. Chaque journee est encadree d'un filet
+    gris moyen #666666, matin et apres-midi ensemble sans trait entre eux,
+    et un filet separe chaque bureau. Chaque collaborateur porte son
+    pastel, pose par mise en forme conditionnelle et jamais par une
+    couleur de cellule ; ce qui n'est pas un nom de personne garde la
+    couleur de son type, et ce que le moteur ne reconnait pas reste blanc.
+    """
+    texte = {"fontFamily": POLICE, "fontSize": TAILLE, "foregroundColor": _rvb(TEAL)}
+    masque = ("userEnteredFormat.textFormat.fontFamily,"
+              "userEnteredFormat.textFormat.fontSize,"
+              "userEnteredFormat.textFormat.foregroundColor")
+    filet = {"style": "SOLID_MEDIUM", "color": _rvb(GRIS)}
+    aucun = {"style": "NONE"}
+    requetes = []
+    if base:
+        requetes += [
+            {"updateSheetProperties": {
+                "properties": {"sheetId": identifiant, "gridProperties": {
+                    "hideGridlines": True, "frozenRowCount": 0}},
+                "fields": "gridProperties.hideGridlines,gridProperties.frozenRowCount"}},
+            {"repeatCell": {
+                "range": {"sheetId": identifiant},
+                "cell": {"userEnteredFormat": {
+                    "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+                    "wrapStrategy": "WRAP", "textFormat": dict(texte, bold=False)}},
+                "fields": ("userEnteredFormat.horizontalAlignment,"
+                           "userEnteredFormat.verticalAlignment,"
+                           "userEnteredFormat.wrapStrategy,"
+                           "userEnteredFormat.textFormat.bold," + masque)}},
+            {"repeatCell": {
+                "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 1},
+                "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT",
+                                               "textFormat": dict(texte, bold=True)}},
+                "fields": ("userEnteredFormat.horizontalAlignment,"
+                           "userEnteredFormat.textFormat.bold," + masque)}},
+        ]
+
     for bloc in _blocs(grille):
         c0 = bloc["colonne_jour"]
         c1 = max(c for c, _ in bloc["bureaux"]) + 1
-        r_entete = bloc["ligne_entete"]
         requetes.append({"repeatCell": {
-            "range": {"sheetId": identifiant, "startRowIndex": r_entete, "endRowIndex": r_entete + 1,
+            "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"],
+                      "endRowIndex": bloc["ligne_entete"] + 1,
                       "startColumnIndex": c0, "endColumnIndex": c1},
-            "cell": {"userEnteredFormat": {"backgroundColor": _rvb(DORE), "textFormat": dict(texte_commun, bold=True)}},
-            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold," + masque_texte,
-        }})
-        requetes.append({"addBanding": {"bandedRange": {
-            "range": {"sheetId": identifiant, "startRowIndex": bloc["premiere_ligne"],
-                      "endRowIndex": bloc["premiere_ligne"] + 12, "startColumnIndex": c0, "endColumnIndex": c1},
-            "rowProperties": {"firstBandColor": _rvb(BLANC), "secondBandColor": _rvb(famille)},
-        }}})
-        plages.append({"sheetId": identifiant, "startRowIndex": bloc["premiere_ligne"],
-                       "endRowIndex": bloc["premiere_ligne"] + 12, "startColumnIndex": c0 + 2, "endColumnIndex": c1})
+            "cell": {"userEnteredFormat": {"backgroundColor": _rvb(DORE),
+                                           "textFormat": dict(texte, bold=True)}},
+            "fields": ("userEnteredFormat.backgroundColor,"
+                       "userEnteredFormat.textFormat.bold," + masque)}})
+        for k in range(6):
+            r = bloc["premiere_ligne"] + 2 * k
+            requetes.append({"updateBorders": {
+                "range": {"sheetId": identifiant, "startRowIndex": r, "endRowIndex": r + 2,
+                          "startColumnIndex": c0, "endColumnIndex": c1},
+                "top": filet, "bottom": filet, "left": filet, "right": filet,
+                "innerVertical": filet, "innerHorizontal": aucun}})
+
+    plages = _plages_occupant(identifiant, grille)
     if plages:
-        for valeur, couleur in COULEURS_TYPE.items():
+        valeurs = dict(COULEURS_TYPE)
+        valeurs.update(couleurs or {})
+        for valeur, couleur in valeurs.items():
             requetes.append({"addConditionalFormatRule": {"rule": {
                 "ranges": plages,
-                "booleanRule": {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
-                                "format": {"backgroundColor": _rvb(couleur)}},
+                "booleanRule": {
+                    "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
+                    "format": {"backgroundColor": _rvb(couleur)}},
             }, "index": 0}})
     return requetes
 
@@ -2370,9 +2505,10 @@ def lieux_poser_la_charte(sujet: str = ""):
     Charte section 17 : Manjari 7, texte teal #128da0 partout, cellules
     centrees et renvoyees a la ligne, quadrillage masque, en-tete doree
     et grasse. Alternance par bandes, une ligne sur deux : jaune la ou une
-    personne saisit, violet #efebf7 la ou le moteur ecrit. Sur les grilles
-    larges, l'alternance est posee bloc par bloc, sur les douze lignes de
-    chaque site, et l'en-tete de chaque bloc est doree.
+    personne saisit, violet #efebf7 la ou le moteur ecrit. Les grilles
+    d'occupation font exception depuis le 13.09.2026 : pas d'alternance,
+    un filet gris moyen autour de chaque journee et entre chaque bureau,
+    un pastel par collaborateur.
 
     Les listes deroulantes sont BLOQUANTES et s'affichent en texte brut,
     leurs valeurs colorees par mise en forme conditionnelle. Les onglets
@@ -2381,6 +2517,7 @@ def lieux_poser_la_charte(sujet: str = ""):
     restent ouvertes a la saisie.
     """
     proprietes = _onglets(sujet=sujet)
+    couleurs = _couleurs_personnes(sujet=sujet)
     familles = {
         ONGLET_REFERENTIEL: VIOLET,
         ONGLET_ATTRIBUTIONS: VIOLET,
@@ -2471,28 +2608,7 @@ def lieux_poser_la_charte(sujet: str = ""):
                 }}})
         else:
             grille = _lire(titre, sujet=sujet)
-            for bloc in _blocs(grille):
-                c0 = bloc["colonne_jour"]
-                c1 = max(c for c, _ in bloc["bureaux"]) + 1
-                r_entete = bloc["ligne_entete"]
-                requetes.append({"repeatCell": {
-                    "range": {"sheetId": identifiant, "startRowIndex": r_entete, "endRowIndex": r_entete + 1,
-                              "startColumnIndex": c0, "endColumnIndex": c1},
-                    "cell": {"userEnteredFormat": {
-                        "backgroundColor": _rvb(DORE),
-                        "textFormat": dict(texte_commun, bold=True),
-                    }},
-                    "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold," + masque_texte,
-                }})
-                requetes.append({"addBanding": {"bandedRange": {
-                    "range": {"sheetId": identifiant, "startRowIndex": bloc["premiere_ligne"],
-                              "endRowIndex": bloc["premiere_ligne"] + 12,
-                              "startColumnIndex": c0, "endColumnIndex": c1},
-                    "rowProperties": {
-                        "firstBandColor": _rvb(BLANC),
-                        "secondBandColor": _rvb(famille),
-                    },
-                }}})
+            requetes.extend(_requetes_charte_bureaux(identifiant, grille, couleurs, base=False))
             requetes.append({"repeatCell": {
                 "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": 1,
                           "startColumnIndex": 0, "endColumnIndex": 1},
@@ -2537,37 +2653,22 @@ def lieux_poser_la_charte(sujet: str = ""):
             },
         }})
 
-    # Couleurs des types, sur les trois grilles
-    plages_couleurs = list(plages_occupant)
-    for titre in (ONGLET_VUE, ONGLET_PLANIFICATION):
-        if titre not in proprietes:
-            continue
-        grille = _lire(titre, sujet=sujet)
-        for bloc in _blocs(grille):
-            colonnes_bureaux = [c for c, _ in bloc["bureaux"]]
-            if colonnes_bureaux:
-                plages_couleurs.append({
-                    "sheetId": proprietes[titre]["sheetId"],
-                    "startRowIndex": bloc["premiere_ligne"],
-                    "endRowIndex": bloc["premiere_ligne"] + 12,
-                    "startColumnIndex": min(colonnes_bureaux),
-                    "endColumnIndex": max(colonnes_bureaux) + 1,
-                })
-    # Une regle par onglet : les plages d'une regle doivent toutes etre sur la meme grille.
-    par_onglet = {}
-    for plage in plages_couleurs:
-        par_onglet.setdefault(plage["sheetId"], []).append(plage)
-    for plages in par_onglet.values():
-        for valeur, couleur in COULEURS_TYPE.items():
-            requetes.append({"addConditionalFormatRule": {
-                "rule": {
-                    "ranges": plages,
-                    "booleanRule": {
-                        "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
-                        "format": {"backgroundColor": _rvb(couleur)},
-                    },
-                },
-                "index": 0,
+    # La colonne Couleur de Listes montre le pastel de chaque collaborateur
+    if ONGLET_LISTES in proprietes:
+        sid_listes = proprietes[ONGLET_LISTES]["sheetId"]
+        try:
+            i_pastel = _colonne(listes[0], "Couleur")
+        except RuntimeError:
+            i_pastel = None
+        for r, ligne in enumerate(listes[1:], start=1):
+            couleur = couleurs.get(_cellule(ligne, 0)) if i_pastel is not None else None
+            if not couleur:
+                continue
+            requetes.append({"repeatCell": {
+                "range": {"sheetId": sid_listes, "startRowIndex": r, "endRowIndex": r + 1,
+                          "startColumnIndex": i_pastel, "endColumnIndex": i_pastel + 1},
+                "cell": {"userEnteredFormat": {"backgroundColor": _rvb(couleur)}},
+                "fields": "userEnteredFormat.backgroundColor",
             }})
 
     # Statuts du registre et dates manquantes
@@ -2644,7 +2745,8 @@ def lieux_poser_la_charte(sujet: str = ""):
                    "onglets traités : " + ", ".join(traites)]], sujet=sujet)
     return {"onglets_traites": traites, "requetes": len(requetes),
             "onglets_proteges": consultation,
-            "plages_de_saisie_validees": len(plages_occupant)}
+            "plages_de_saisie_validees": len(plages_occupant),
+            "couleurs_de_collaborateurs": len(couleurs)}
 
 
 # ------------------------------------------------------------------ cycle
