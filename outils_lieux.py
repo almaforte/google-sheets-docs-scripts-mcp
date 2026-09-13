@@ -1685,7 +1685,7 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
         site_par_batiment[_normaliser(fiche["nom_batiment"])] = fiche["site"]
 
     jour_meme = _aujourdhui()
-    par_personne = {}
+    sites_par_personne = {}
     for ligne in registre[1:]:
         if _cellule(ligne, i["Statut"]) not in ("Active", "Confirmée"):
             continue
@@ -1697,8 +1697,21 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             continue
         personne = _normaliser(_cellule(ligne, i["Collaborateur"]))
         site = site_par_batiment.get(_normaliser(_cellule(ligne, i["Bâtiment"])), "")
+        if not site:
+            continue
         creneau = _cellule(ligne, i["Jour"]) + " " + _cellule(ligne, i["Demi-journée"]).lower()
-        par_personne.setdefault(personne, {})[_normaliser(creneau)] = site
+        sites_par_personne.setdefault(personne, {}).setdefault(_normaliser(creneau), set()).add(site)
+
+    # Une personne attribuee a deux sites sur la meme demi-journee : le
+    # registre se contredit, on n'ecrit rien et on le dit.
+    par_personne, conflits = {}, []
+    for personne, creneaux_sites in sites_par_personne.items():
+        for creneau, sites in creneaux_sites.items():
+            if len(sites) == 1:
+                par_personne.setdefault(personne, {})[creneau] = next(iter(sites))
+            else:
+                conflits.append({"collaborateur": personne.title(), "creneau": creneau.lower(),
+                                 "sites": sorted(sites)})
 
     effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
     tetes = effectif[0]
@@ -1741,6 +1754,7 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             "collaborateurs_concernes": touches,
             "changements": len(apercu),
             "apercu": apercu[:40],
+            "conflits": conflits,
         }
 
     donnees = [{
@@ -1753,9 +1767,14 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             body={"valueInputOption": "RAW", "data": donnees},
         ).execute()
 
-    _journaliser([[_maintenant(), "Effectif", "Sites par demi-journée", "Effectif", "",
-                   str(len(donnees)), "Terminé", str(touches) + " collaborateurs concernés"]], sujet=sujet)
-    return {"ecrit": True, "cellules": len(donnees), "collaborateurs_concernes": touches}
+    journal = [[_maintenant(), "Effectif", "Sites par demi-journée", ONGLET_EFFECTIF, "",
+                str(len(donnees)), "Terminé", str(touches) + " collaborateurs concernés, "
+                + str(len(conflits)) + " demi-journées en conflit laissées en l'état"]]
+    for c in conflits:
+        journal.append([_maintenant(), "Effectif", "Conflit de site", c["collaborateur"], "", "", "À vérifier",
+                        c["creneau"] + " : " + " et ".join(c["sites"])])
+    _journaliser(journal, sujet=sujet)
+    return {"ecrit": True, "cellules": len(donnees), "collaborateurs_concernes": touches, "conflits": conflits}
 
 
 def _rythme_par_bureau(sujet: str = ""):
