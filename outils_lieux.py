@@ -1642,6 +1642,21 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
     if not vue:
         return {"refuse": True, "raison": "La vue du jour est vide, rien à publier."}
 
+    # L'onglet d'arrivee repart d'une page blanche : fusions, formats et
+    # bandes de l'ancienne grille survivraient sinon a l'effacement des
+    # valeurs, et la nouvelle geometrie serait ecrite de travers.
+    sid = _onglets(ID_PATIENTS, sujet=sujet)[ONGLET_PATIENTS]["sheetId"]
+    nettoyage = []
+    for feuille in _etat_complet(ID_PATIENTS, sujet=sujet):
+        if feuille["properties"]["sheetId"] != sid:
+            continue
+        for bande in feuille.get("bandedRanges", []):
+            nettoyage.append({"deleteBanding": {"bandedRangeId": bande["bandedRangeId"]}})
+        for k in range(len(feuille.get("conditionalFormats", [])) - 1, -1, -1):
+            nettoyage.append({"deleteConditionalFormatRule": {"sheetId": sid, "index": k}})
+    nettoyage.append({"unmergeCells": {"range": {"sheetId": sid}}})
+    nettoyage.append({"updateCells": {"range": {"sheetId": sid}, "fields": "userEnteredFormat,dataValidation"}})
+    _feuilles(sujet).batchUpdate(spreadsheetId=ID_PATIENTS, body={"requests": nettoyage}).execute()
     _feuilles(sujet).values().clear(
         spreadsheetId=ID_PATIENTS, range="'" + ONGLET_PATIENTS + "'", body={}
     ).execute()
@@ -1653,11 +1668,14 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
         valueInputOption="RAW",
         body={"values": normalise},
     ).execute()
+    _feuilles(sujet).batchUpdate(
+        spreadsheetId=ID_PATIENTS, body={"requests": _requetes_charte_grille(sid, normalise, VIOLET)}
+    ).execute()
 
     _journaliser([[_maintenant(), "Publication", "Copie vers Almaval - Patients", ONGLET_PATIENTS, "",
                    str(len(normalise)), "Terminé", "vue du " + _aujourdhui()]], sujet=sujet)
     return {"publie": True, "lignes": len(normalise),
-            "onglet": "https://docs.google.com/spreadsheets/d/" + ID_PATIENTS + "/edit"}
+            "onglet": "https://docs.google.com/spreadsheets/d/" + ID_PATIENTS + "/edit#gid=" + str(sid)}
 
 
 @mcp.tool()
@@ -2166,6 +2184,65 @@ def lieux_retablir_journee(identifiant_bureau: str, date: str, sujet: str = ""):
 
 
 # --------------------------------------------------- charte et protections
+
+def _requetes_charte_grille(identifiant: int, grille, famille: str):
+    """Requetes de charte d'une grille large, dans n'importe quel classeur.
+
+    Quadrillage masque, Manjari 7 teal partout, titre en A1 a gauche et
+    en gras, en-tete doree et bande alternee blanc et famille sur les
+    douze lignes de chaque bloc, couleurs des types d'occupation.
+    """
+    texte_commun = {"fontFamily": POLICE, "fontSize": TAILLE, "foregroundColor": _rvb(TEAL)}
+    masque_texte = ("userEnteredFormat.textFormat.fontFamily,"
+                    "userEnteredFormat.textFormat.fontSize,"
+                    "userEnteredFormat.textFormat.foregroundColor")
+    requetes = [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": identifiant, "gridProperties": {"hideGridlines": True, "frozenRowCount": 0}},
+            "fields": "gridProperties.hideGridlines,gridProperties.frozenRowCount",
+        }},
+        {"repeatCell": {
+            "range": {"sheetId": identifiant},
+            "cell": {"userEnteredFormat": {
+                "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP",
+                "textFormat": dict(texte_commun, bold=False),
+            }},
+            "fields": ("userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,"
+                       "userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.bold," + masque_texte),
+        }},
+        {"repeatCell": {
+            "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 1},
+            "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT", "textFormat": dict(texte_commun, bold=True)}},
+            "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold," + masque_texte,
+        }},
+    ]
+    plages = []
+    for bloc in _blocs(grille):
+        c0 = bloc["colonne_jour"]
+        c1 = max(c for c, _ in bloc["bureaux"]) + 1
+        r_entete = bloc["ligne_entete"]
+        requetes.append({"repeatCell": {
+            "range": {"sheetId": identifiant, "startRowIndex": r_entete, "endRowIndex": r_entete + 1,
+                      "startColumnIndex": c0, "endColumnIndex": c1},
+            "cell": {"userEnteredFormat": {"backgroundColor": _rvb(DORE), "textFormat": dict(texte_commun, bold=True)}},
+            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold," + masque_texte,
+        }})
+        requetes.append({"addBanding": {"bandedRange": {
+            "range": {"sheetId": identifiant, "startRowIndex": bloc["premiere_ligne"],
+                      "endRowIndex": bloc["premiere_ligne"] + 12, "startColumnIndex": c0, "endColumnIndex": c1},
+            "rowProperties": {"firstBandColor": _rvb(BLANC), "secondBandColor": _rvb(famille)},
+        }}})
+        plages.append({"sheetId": identifiant, "startRowIndex": bloc["premiere_ligne"],
+                       "endRowIndex": bloc["premiere_ligne"] + 12, "startColumnIndex": c0 + 2, "endColumnIndex": c1})
+    if plages:
+        for valeur, couleur in COULEURS_TYPE.items():
+            requetes.append({"addConditionalFormatRule": {"rule": {
+                "ranges": plages,
+                "booleanRule": {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
+                                "format": {"backgroundColor": _rvb(couleur)}},
+            }, "index": 0}})
+    return requetes
+
 
 @mcp.tool()
 @tolerant
