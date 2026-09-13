@@ -97,12 +97,19 @@ VIOLET = "#efebf7"
 BLANC = "#ffffff"
 ROUGE = "#ff0000"
 GRIS = "#666666"
+ORANGE = "#f9cb9c"
+ROUGE_DOUX = "#cc0000"
+
+LIBELLE_ETAGE = "Étage"
+LIBELLE_NUMERO = "Numéro du bureau"
+# Ce qui signale une attribution encore incertaine dans la remarque
+MOTS_INCERTAINS = "incertain|confirmer|inconnu"
 
 # Pastels « clair 3 » de Google, repris tels quels, pour les valeurs non
 # nominatives d'une cellule de la grille.
 COULEURS_TYPE = {
     "Ménage": "#d9d9d9",
-    "Réservé direction": "#c9daf8",
+    "Direction": "#c9daf8",
     "Colloque": "#d0e0e3",
     "Formation": "#d9ead3",
     "Kétamine": "#ead1dc",
@@ -111,7 +118,7 @@ COULEURS_TYPE = {
     "Admin": "#cfe2f3",
     "Libre": "#d9ead3",
 }
-TYPES_REQUIS = ["Ménage", "Réservé direction", "Colloque", "Formation", "Kétamine",
+TYPES_REQUIS = ["Ménage", "Direction", "Colloque", "Formation", "Kétamine",
                 "Salle polyvalente", "Salle de pause", "Admin", "Libre"]
 
 JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
@@ -124,11 +131,11 @@ MARQUEUR = "almaval_lieux"
 
 ORDRE_BATIMENTS = [
     ["Crissier"],
-    ["Lausanne - Lisière"],
     ["Lausanne - Riponne"],
     ["Morges GR 94", "Morges GR 77"],
     ["Vevey"],
     ["Genève - Michel-Chauvet"],
+    ["Lausanne - Lisière"],
 ]
 
 # Noms de sites de l'ancienne grille vers le nom du batiment du referentiel
@@ -144,7 +151,7 @@ SITES_ANCIENNE_GRILLE = {
     "ADMIN": "Crissier",
 }
 ALIAS_BUREAUX = {"LOUNGE": "SALLE JOKER"}
-TYPES_ANCIENNE_GRILLE = {"DIRECTION": "Réservé direction"}
+TYPES_ANCIENNE_GRILLE = {"DIRECTION": "Direction"}
 
 
 # ------------------------------------------------------------- outillage
@@ -435,10 +442,13 @@ def _etage_lisible(etage: str) -> str:
 def _squelette(par_identifiant):
     """Construit la grille vide, en bandes de sites, depuis le referentiel.
 
-    Chaque bande : une ligne d'etages, une ligne « Jour | SITE | bureaux |
-    Ménage », une ligne de numeros, puis douze lignes de demi-journees.
-    Les deux immeubles de Morges sont cote a cote sur les memes lignes,
-    chacun avec sa propre cellule « Jour », ce que _blocs sait lire.
+    La premiere ligne ne porte que le titre de l'onglet. Chaque bande :
+    une ligne d'etages, une ligne « Jour | SITE | bureaux | Ménage », une
+    ligne de numeros, puis douze lignes de demi-journees. Les deux
+    premieres colonnes des lignes d'etage et de numeros portent leur
+    etiquette. Les deux immeubles de Morges sont cote a cote sur les
+    memes lignes, chacun avec sa propre cellule « Jour », ce que _blocs
+    sait lire.
     """
     par_nom = {}
     for fiche in par_identifiant.values():
@@ -446,7 +456,7 @@ def _squelette(par_identifiant):
     for nom in par_nom:
         par_nom[nom].sort(key=lambda f: f["ordre"])
 
-    grille = []
+    grille = [[]]  # la ligne 1 ne porte que le titre de l'onglet
     for groupe in ORDRE_BATIMENTS:
         colonnes_blocs = []
         depart = 0
@@ -465,6 +475,8 @@ def _squelette(par_identifiant):
         entete = [""] * largeur_bande
         numeros = [""] * largeur_bande
         for depart, nom, fiches in colonnes_blocs:
+            etages[depart] = LIBELLE_ETAGE
+            numeros[depart] = LIBELLE_NUMERO
             entete[depart] = "Jour"
             entete[depart + 1] = nom.upper()
             precedent = None
@@ -477,7 +489,7 @@ def _squelette(par_identifiant):
                     etages[c] = lisible
                 precedent = lisible or precedent
             entete[depart + 2 + len(fiches)] = "Ménage"
-        if grille:
+        if len(grille) > 1:
             grille.append([])
         grille.append(etages)
         grille.append(entete)
@@ -1206,6 +1218,9 @@ def _ecrire_grille(onglet: str, grille, sujet: str = ""):
     _vider(onglet, sujet=sujet)
     if sortie:
         _ecrire(onglet, "A1:" + _lettre(largeur - 1) + str(len(sortie)), sortie, sujet=sujet)
+    habillage = _fusions_entetes(sid, sortie) + _largeurs(sid, sortie)
+    if habillage:
+        _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": habillage}).execute()
     return len(sortie), largeur
 
 
@@ -1566,6 +1581,24 @@ def _presence_administrative(remarque) -> bool:
     return "BLOC ADMIN" in _normaliser(remarque)
 
 
+def _valeur_affichee(occupant: str, remarque: str) -> str:
+    """Ce qui s'ecrit dans la cellule d'une grille generee.
+
+    Le menage porte son horaire de passage, lu dans la remarque de sa
+    ligne de registre. Une attribution encore incertaine (date à
+    confirmer, date incertaine, nom inconnu de l'effectif) porte un point
+    d'interrogation : elle se voit dans la planification sans se faire
+    passer pour une decision prise.
+    """
+    valeur = occupant
+    remarque = str(remarque or "")
+    if _normaliser(occupant) == "MENAGE" and remarque.strip():
+        valeur += " " + remarque.strip()
+    if re.search(MOTS_INCERTAINS, remarque, re.IGNORECASE):
+        valeur += " ?"
+    return valeur
+
+
 def _actives_au(date_iso: str, sujet: str = ""):
     registre = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)
     entetes = registre[0]
@@ -1594,7 +1627,8 @@ def _actives_au(date_iso: str, sujet: str = ""):
             _cellule(ligne, i["Jour"]),
             _cellule(ligne, i["Demi-journée"]),
         ])
-        actives.setdefault(cle, []).append(_cellule(ligne, i["Collaborateur"]))
+        actives.setdefault(cle, []).append(_valeur_affichee(
+            _cellule(ligne, i["Collaborateur"]), _cellule(ligne, i["Remarque"])))
     return actives
 
 
@@ -1644,6 +1678,8 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     Active ou Confirmee, ou Proposee avec une date de debut, debut au
     plus tard a la date, fin au plus tot a la date, sans les presences
     administratives. Plusieurs personnes sont jointes par une virgule.
+    L'affichage suit celui des vues : horaire du menage, point
+    d'interrogation quand l'attribution est encore incertaine.
     """
     registre = "Attributions!$A$2:$Z"
     entetes = "Attributions!$A$1:$Z$1"
@@ -1651,8 +1687,11 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     def col(nom):
         return 'INDEX(' + registre + ';0;EQUIV("' + nom + '";' + entetes + ';0))'
 
+    affiche = (col("Collaborateur")
+               + '&SI(' + col("Collaborateur") + '="Ménage";" "&' + col("Remarque") + ';"")'
+               + '&SI(REGEXMATCH(' + col("Remarque") + '&"";"' + MOTS_INCERTAINS + '");" ?";"")')
     return (
-        '=ARRAYFORMULA(SIERREUR(TEXTJOIN(", ";VRAI;FILTER(' + col("Collaborateur")
+        '=ARRAYFORMULA(SIERREUR(TEXTJOIN(", ";VRAI;FILTER(' + affiche
         + ';' + col("Bâtiment") + '=' + site_ref
         + ';' + col("Bureau") + '=' + bureau_ref
         + ';' + col("Jour") + '="' + jour + '"'
@@ -1731,6 +1770,74 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
 
 @mcp.tool()
 @tolerant
+def lieux_reprendre_geometrie(sujet: str = ""):
+    """Reecrit Propositions dans la geometrie courante du referentiel.
+
+    L'ordre des batiments, les lignes d'etage et d'en-tete peuvent
+    changer ; la saisie, elle, ne doit pas se perdre. Chaque valeur est
+    relue par sa clef (batiment, bureau, jour, demi-journee) puis reposee
+    au bon endroit de la nouvelle grille. Les vues sont ensuite
+    regenerees.
+    """
+    ancienne = _lire(ONGLET_GRILLE, sujet=sujet)
+    valeurs = {}
+    for bloc in _blocs(ancienne):
+        jour_courant = ""
+        for decalage in range(12):
+            r = bloc["premiere_ligne"] + decalage
+            if r >= len(ancienne):
+                break
+            jour = _cellule(ancienne[r], bloc["colonne_jour"]) or jour_courant
+            jour_courant = jour
+            demi = _cellule(ancienne[r], bloc["colonne_demi"])
+            if not jour or not demi:
+                continue
+            for colonne, nom_bureau in bloc["bureaux"]:
+                valeur = str(_cellule(ancienne[r], colonne)).strip()
+                if valeur:
+                    valeurs["|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau),
+                                      jour, demi])] = valeur
+
+    _, par_identifiant = _table_referentiel(sujet=sujet)
+    squelette = _squelette(par_identifiant)
+    largeur = max((len(l) for l in squelette), default=0)
+    sortie = [list(l) + [""] * (largeur - len(l)) for l in squelette]
+    reposees, placees = 0, set()
+    for bloc in _blocs(squelette):
+        jour_courant = ""
+        for decalage in range(12):
+            r = bloc["premiere_ligne"] + decalage
+            if r >= len(sortie):
+                break
+            jour = _cellule(squelette[r], bloc["colonne_jour"]) or jour_courant
+            jour_courant = jour
+            demi = _cellule(squelette[r], bloc["colonne_demi"])
+            if not jour or not demi:
+                continue
+            for colonne, nom_bureau in bloc["bureaux"]:
+                cle = "|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau), jour, demi])
+                valeur = valeurs.get(cle, "")
+                sortie[r][colonne] = valeur
+                if valeur:
+                    reposees += 1
+                    placees.add(cle)
+
+    _reinitialiser_onglet(ONGLET_GRILLE, sujet=sujet)
+    _ecrire_grille(ONGLET_GRILLE, sortie, sujet=sujet)
+    for titre in (ONGLET_VUE, ONGLET_PLANIFICATION):
+        _reinitialiser_onglet(titre, sujet=sujet)
+    vue = _generer_vue(ONGLET_VUE, _aujourdhui(), sujet=sujet)
+    planification = _generer_planification(sujet=sujet)
+    _journaliser([[_maintenant(), ONGLET_GRILLE, "Nouvelle géométrie", "Référentiel - Bureaux",
+                   str(len(valeurs)), str(reposees), "Terminé",
+                   "cellules relues " + str(len(valeurs)) + ", reposées " + str(reposees)]], sujet=sujet)
+    return {"cellules_relues": len(valeurs), "cellules_reposees": reposees,
+            "non_retrouvees": sorted(set(valeurs) - placees)[:20],
+            "vue_actuelle": vue, "planification": planification}
+
+
+@mcp.tool()
+@tolerant
 def lieux_vue_actuelle(date: str = "", sujet: str = ""):
     """Reconstruit la vue du jour, meme geometrie que Propositions.
 
@@ -1801,7 +1908,9 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
     couleurs = _couleurs_personnes(sujet=sujet)
     _feuilles(sujet).batchUpdate(spreadsheetId=ID_PATIENTS, body={"requests":
         _requetes_charte_bureaux(sid, normalise, couleurs)
-        + _fusions_demi_journees(sid, normalise)}).execute()
+        + _fusions_entetes(sid, normalise)
+        + _fusions_demi_journees(sid, normalise)
+        + _largeurs(sid, normalise)}).execute()
 
     _journaliser([[_maintenant(), "Publication", "Copie vers Almaval - Patients", ONGLET_PATIENTS, "",
                    str(len(normalise)), "Terminé", "vue du " + _aujourdhui()]], sujet=sujet)
@@ -2316,17 +2425,43 @@ def lieux_retablir_journee(identifiant_bureau: str, date: str, sujet: str = ""):
 
 # --------------------------------------------------- charte et protections
 
-def _pastel(rang: int) -> str:
-    """Pastel de la gamme « clair 3 » de Google, meme intensite pour tous.
+PASTELS = (
+    "#6cdbd3", "#e5baf4", "#67d8f6", "#c3d08f", "#91d8ae", "#feb8b2",
+    "#ffb3d9", "#c0ecb2", "#91d4dc", "#9cd5c3", "#7cf1fd", "#cfcba1",
+    "#eee09f", "#cbc3f7", "#90d1f9", "#95f1d5", "#efd7fe", "#e7c1b5",
+    "#fdb6c5", "#aaece7", "#b1d2af", "#e5bddd", "#abe9fe", "#a9cbfd",
+    "#d7e6b1", "#b6ecc6", "#f8bca3", "#d1c4e1", "#dfc789", "#d8c7ac",
+    "#a6d0df", "#c3cdb0", "#afd499", "#a4d2ce", "#64dae2", "#81f2ee",
+    "#ffd1fe", "#e9c2a5", "#f4b6e8", "#eae0b6", "#b6ebd5", "#ffd7ce",
+    "#7cdac1", "#b9e8ef", "#efbbcf", "#b1d1bd", "#ffd3f1", "#f7ddab",
+    "#e9bfc2", "#94edff", "#bcd09d", "#c2c7f0", "#9defe0", "#72d5fe",
+    "#dee5a3", "#a7cdf1", "#d6bffd", "#cce8c2", "#a3f0c8", "#7dd6e8",
+    "#87d8ca", "#9ad1ec", "#e4dbf9", "#7fd8d7", "#bee8dd", "#a0d6a3",
+    "#95eff1", "#fcbb96", "#f2b8dc", "#d0cc8b", "#95d7ba", "#b1eebc",
+    "#d7c995", "#bac7fc", "#dabff0", "#e5e2ac", "#dcc7a0", "#e3e1c2",
+    "#83d4f2", "#a2d5ae", "#e8bbe7", "#f3bdb2", "#fed9b9", "#dfc1d7",
+    "#fddb9f", "#cfe8a9", "#afcde5", "#f4bbc3", "#f2d8f1", "#cacd98",
+    "#a7ebf2", "#dce4ba", "#a9eed2", "#62d9ec", "#cae9b7", "#93d5d1",
+    "#f9b7d1", "#aed3a5", "#bfcfa7", "#d9c1e7", "#89f2e3", "#e3c596",
+    "#ffd5dd", "#bce6f7", "#93d3e5", "#f1bf9c", "#c0eacb", "#c4c7e5",
+    "#e6bfcd", "#a5d4b9", "#e1c4af", "#f5dcb6", "#b3caf2", "#a2d1d7",
+    "#cecaac", "#efbfaa", "#e9c38b", "#9dcefc", "#c6e8d4", "#88d9b7",
+)
 
-    La teinte avance de l'angle d'or, ce qui eloigne deux rangs voisins ;
-    la clarte ne bouge jamais, seule la saturation change par cran. Toutes
-    les couleurs ont donc la meme force, comme la troisieme ligne des
-    couleurs standard, et la gamme se prolonge au-dela de ses dix teintes.
+
+def _pastel(rang: int) -> str:
+    """Pastel du nuancier maison, deux niveaux de clarte.
+
+    Le nuancier prolonge la gamme « clair 3 » de Google sur deux niveaux,
+    un clair et un plus soutenu, et ses cent vingt teintes sont choisies
+    de proche en proche pour que la distance entre deux couleurs, mesuree
+    dans l'espace perceptif CIELAB, reste la plus grande possible. Les
+    couleurs des types d'occupation sont exclues du nuancier.
     """
+    if 0 <= rang < len(PASTELS):
+        return PASTELS[rang]
     teinte = ((rang * 137.508) % 360) / 360.0
-    saturation = (0.95, 0.70, 0.52, 0.40)[rang % 4]
-    r, v, b = colorsys.hls_to_rgb(teinte, 0.87, saturation)
+    r, v, b = colorsys.hls_to_rgb(teinte, 0.85, 0.55)
     return "#%02x%02x%02x" % (round(r * 255), round(v * 255), round(b * 255))
 
 
@@ -2398,6 +2533,70 @@ def _plages_occupant(identifiant: int, grille):
     return plages
 
 
+def _fusions_entetes(identifiant: int, grille):
+    """Fusions des deux lignes qui encadrent l'en-tete d'un bloc.
+
+    « Étage » et « Numéro du bureau » occupent les deux premieres
+    colonnes du bloc, et chaque etage se lit d'un seul tenant au-dessus
+    des bureaux qu'il couvre.
+    """
+    def fusion(r, c0, c1):
+        return {"mergeCells": {"mergeType": "MERGE_ALL", "range": {
+            "sheetId": identifiant, "startRowIndex": r, "endRowIndex": r + 1,
+            "startColumnIndex": c0, "endColumnIndex": c1}}}
+
+    requetes = []
+    for bloc in _blocs(grille):
+        r_etage = bloc["ligne_entete"] - 1
+        r_numero = bloc["ligne_entete"] + 1
+        for r in (r_etage, r_numero):
+            if r >= 0:
+                requetes.append(fusion(r, bloc["colonne_jour"], bloc["colonne_demi"] + 1))
+        if r_etage < 0 or r_etage >= len(grille):
+            continue
+        ligne = grille[r_etage]
+        colonnes = [c for c, n in bloc["bureaux"] if _normaliser(n) != "MENAGE"]
+        debut, groupes = None, []
+        for c in colonnes:
+            if str(_cellule(ligne, c)).strip():
+                if debut is not None:
+                    groupes.append((debut, c - 1))
+                debut = c
+        if debut is not None and colonnes:
+            groupes.append((debut, colonnes[-1]))
+        for a, b in groupes:
+            if b > a:
+                requetes.append(fusion(r_etage, a, b + 1))
+    return requetes
+
+
+def _largeurs(identifiant: int, grille):
+    """Largeur de chaque colonne, ajustee au contenu le plus long.
+
+    Les etiquettes des lignes Étage et Numéro du bureau sont fusionnees
+    sur deux colonnes : elles ne comptent donc pas dans la mesure, sans
+    quoi la colonne des jours s'elargirait pour rien.
+    """
+    ignorees = set()
+    for bloc in _blocs(grille):
+        for r in (bloc["ligne_entete"] - 1, bloc["ligne_entete"] + 1):
+            ignorees.add((r, bloc["colonne_jour"]))
+            ignorees.add((r, bloc["colonne_demi"]))
+    requetes = []
+    for c in range(max((len(l) for l in grille), default=0)):
+        longueur = 0
+        for r, ligne in enumerate(grille):
+            if r == 0 or (r, c) in ignorees:
+                continue
+            longueur = max(longueur, len(str(_cellule(ligne, c))))
+        taille = 18 if longueur == 0 else int(min(190, max(38, 12 + 4.6 * longueur)))
+        requetes.append({"updateDimensionProperties": {
+            "range": {"sheetId": identifiant, "dimension": "COLUMNS",
+                      "startIndex": c, "endIndex": c + 1},
+            "properties": {"pixelSize": taille}, "fields": "pixelSize"}})
+    return requetes
+
+
 def _fusions_demi_journees(identifiant: int, grille):
     """Fusionne matin et apres-midi quand la valeur est la meme.
 
@@ -2428,7 +2627,8 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
 
     Plus d'alternance de lignes. Chaque journee est encadree d'un filet
     gris moyen #666666, matin et apres-midi ensemble sans trait entre eux,
-    et un filet separe chaque bureau. Chaque collaborateur porte son
+    et un filet separe chaque bureau. L'etage se lit sur un bandeau
+    orange au-dessus de l'en-tete doree. Chaque collaborateur porte son
     pastel, pose par mise en forme conditionnelle et jamais par une
     couleur de cellule ; ce qui n'est pas un nom de personne garde la
     couleur de son type, et ce que le moteur ne reconnait pas reste blanc.
@@ -2467,6 +2667,15 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
     for bloc in _blocs(grille):
         c0 = bloc["colonne_jour"]
         c1 = max(c for c, _ in bloc["bureaux"]) + 1
+        if bloc["ligne_entete"] > 0:
+            requetes.append({"repeatCell": {
+                "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"] - 1,
+                          "endRowIndex": bloc["ligne_entete"],
+                          "startColumnIndex": c0, "endColumnIndex": c1},
+                "cell": {"userEnteredFormat": {"backgroundColor": _rvb(ORANGE),
+                                               "textFormat": dict(texte, bold=True)}},
+                "fields": ("userEnteredFormat.backgroundColor,"
+                           "userEnteredFormat.textFormat.bold," + masque)}})
         requetes.append({"repeatCell": {
             "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"],
                       "endRowIndex": bloc["ligne_entete"] + 1,
@@ -2491,9 +2700,19 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
             requetes.append({"addConditionalFormatRule": {"rule": {
                 "ranges": plages,
                 "booleanRule": {
-                    "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
+                    "condition": {"type": "TEXT_STARTS_WITH",
+                                  "values": [{"userEnteredValue": valeur}]},
                     "format": {"backgroundColor": _rvb(couleur)}},
             }, "index": 0}})
+        # Posee en dernier donc lue en premier : une attribution douteuse
+        # se lit en rouge et en italique, sa couleur de fond restant celle
+        # de la personne.
+        requetes.append({"addConditionalFormatRule": {"rule": {
+            "ranges": plages,
+            "booleanRule": {
+                "condition": {"type": "TEXT_ENDS_WITH", "values": [{"userEnteredValue": " ?"}]},
+                "format": {"textFormat": {"italic": True, "foregroundColor": _rvb(ROUGE_DOUX)}}},
+        }, "index": 0}})
     return requetes
 
 
@@ -2508,7 +2727,7 @@ def lieux_poser_la_charte(sujet: str = ""):
     personne saisit, violet #efebf7 la ou le moteur ecrit. Les grilles
     d'occupation font exception depuis le 13.09.2026 : pas d'alternance,
     un filet gris moyen autour de chaque journee et entre chaque bureau,
-    un pastel par collaborateur.
+    un bandeau orange pour l'etage, un pastel par collaborateur.
 
     Les listes deroulantes sont BLOQUANTES et s'affichent en texte brut,
     leurs valeurs colorees par mise en forme conditionnelle. Les onglets
@@ -2791,6 +3010,8 @@ def _pont(texte: str):
         return lieux_planification(date=params.get("date", ""))
     if nom == "charte":
         return lieux_poser_la_charte()
+    if nom == "geometrie":
+        return lieux_reprendre_geometrie()
     if nom == "ressources":
         return lieux_synchroniser_ressources(confirmer=vrai("confirmer"))
     if nom == "droits":
