@@ -43,6 +43,7 @@ une regle geographique du moteur des groupes qui doit s'en servir.
 
 import datetime
 import re
+import shlex
 import unicodedata
 
 from main import mcp, tolerant
@@ -512,6 +513,9 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
         if bureaux_du_site is None:
             anomalies.append(["Site inconnu du référentiel", bloc["site"], ""])
             continue
+        # Nom du batiment tel que le referentiel l'ecrit, pour que la cle
+        # d'une ligne Ménage soit la meme ici et dans la migration.
+        nom_du_site = next(iter(bureaux_du_site.values()))["nom_batiment"]
 
         jour_courant = ""
         for decalage in range(12):
@@ -546,7 +550,7 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
                 occupations.append({
                     "identifiant": fiche["identifiant"] if fiche else "",
                     "bureau": fiche["bureau"] if fiche else nom_bureau,
-                    "batiment": fiche["nom_batiment"] if fiche else bloc["site"],
+                    "batiment": fiche["nom_batiment"] if fiche else nom_du_site,
                     "site": fiche["site"] if fiche else "",
                     "jour": jour,
                     "demi": demi,
@@ -1147,10 +1151,29 @@ def lieux_preparer(sujet: str = ""):
 
 # --------------------------------------------------------- migration
 
+def _reinitialiser_onglet(titre: str, sujet: str = ""):
+    """Page blanche : cellules defusionnees, formats et valeurs effaces.
+
+    Constate le 13.09.2026 : les fusions de l'ancienne grille survivaient
+    a l'effacement des valeurs, et toute valeur ecrite dans une cellule
+    fusionnee non maitresse etait perdue en silence.
+    """
+    sid = _onglets(sujet=sujet)[titre]["sheetId"]
+    _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": [
+        {"unmergeCells": {"range": {"sheetId": sid}}},
+        {"updateCells": {"range": {"sheetId": sid}, "fields": "userEnteredFormat,dataValidation"}},
+    ]}).execute()
+    _vider(titre, sujet=sujet)
+
+
 def _ecrire_grille(onglet: str, grille, sujet: str = ""):
     largeur = max((len(l) for l in grille), default=1)
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
     _ajuster_taille(onglet, len(sortie) + 2, largeur + 1, sujet=sujet)
+    sid = _onglets(sujet=sujet)[onglet]["sheetId"]
+    _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": [
+        {"unmergeCells": {"range": {"sheetId": sid}}},
+    ]}).execute()
     _vider(onglet, sujet=sujet)
     if sortie:
         _ecrire(onglet, "A1:" + _lettre(largeur - 1) + str(len(sortie)), sortie, sujet=sujet)
@@ -1293,7 +1316,9 @@ def lieux_migrer_ancienne_grille(appliquer: bool = False, source: str = "Proposi
     if requetes:
         _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
 
-    # 2. Propositions au nouveau format
+    # 2. Propositions au nouveau format, sur des onglets remis a blanc
+    for titre in (ONGLET_GRILLE, ONGLET_VUE, ONGLET_PLANIFICATION):
+        _reinitialiser_onglet(titre, sujet=sujet)
     _ecrire_grille(ONGLET_GRILLE, propositions, sujet=sujet)
 
     # 3. Attributions
@@ -1386,7 +1411,7 @@ def lieux_construire_attributions(sujet: str = ""):
         ])
         voulues[cle] = o
 
-    lignes, cree, clos, inchange = [], 0, 0, 0
+    lignes, cree, clos, inchange, a_echeance = [], 0, 0, 0, 0
 
     for cle, o in voulues.items():
         remarque = ""
@@ -1449,7 +1474,10 @@ def lieux_construire_attributions(sujet: str = ""):
         if close[i["Statut"]] == "Terminée" and "Retirée de la grille" not in remarque:
             close[i["Remarque"]] = ", ".join(x for x in [remarque, "Retirée de la grille le " + jour_meme] if x)
         lignes.append(close)
-        clos += 1
+        if close[i["Statut"]] == "Terminée":
+            clos += 1
+        else:
+            a_echeance += 1
 
     lignes.sort(key=lambda l: (l[i["Bâtiment"]], l[i["Bureau"]],
                                JOURS.index(l[i["Jour"]]) if l[i["Jour"]] in JOURS else 9,
@@ -1467,7 +1495,8 @@ def lieux_construire_attributions(sujet: str = ""):
     horodatage = _maintenant()
     journal = [[horodatage, "Attributions", "Construction", "Propositions",
                 str(len(anciennes)), str(len(lignes)),
-                "Terminé", "créées " + str(cree) + ", closes " + str(clos) + ", reconduites " + str(inchange)]]
+                "Terminé", "créées " + str(cree) + ", closes " + str(clos) + ", reconduites " + str(inchange)
+                + ", gardées jusqu'à leur date de fin " + str(a_echeance)]]
     for a in anomalies:
         journal.append([horodatage, "Attributions", "Anomalie", a[1], "", a[2] if len(a) > 2 else "",
                         "À vérifier", a[0]])
@@ -1477,6 +1506,7 @@ def lieux_construire_attributions(sujet: str = ""):
         "attributions": len(lignes),
         "creees": cree,
         "closes": clos,
+        "gardees_jusqu_a_leur_date_de_fin": a_echeance,
         "reconduites": inchange,
         "anomalies": anomalies[:40],
         "nombre_d_anomalies": len(anomalies),
@@ -2378,9 +2408,14 @@ def _pont(texte: str):
     n'y apparait qu'a la conversation suivante. Pour ne pas attendre, le
     parametre sujet de lieux_cycle accepte « action:nom clef=valeur ... »
     et route vers l'outil voulu. Les valeurs oui, vrai et true valent
-    vrai. Exemple : « action:migrer appliquer=oui ».
+    vrai ; une valeur qui porte des espaces se met entre guillemets.
+    Exemples : « action:migrer appliquer=oui »,
+    « action:migrer appliquer=oui source="Archive - Propositions 2026" ».
     """
-    morceaux = texte.strip().split()
+    try:
+        morceaux = shlex.split(texte.strip())
+    except ValueError:
+        morceaux = texte.strip().split()
     if not morceaux:
         return {"refuse": True, "raison": "Aucune action."}
     nom = morceaux[0].lower()
