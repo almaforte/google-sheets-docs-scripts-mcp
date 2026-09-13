@@ -2334,6 +2334,57 @@ def lieux_poser_la_charte(sujet: str = ""):
 
 # ------------------------------------------------------------------ cycle
 
+def _pont(texte: str):
+    """Pont d'appel par le nom d'un outil deja connu du client.
+
+    Constate le 13.09.2026 : le client MCP de claude.ai garde en cache la
+    liste des outils d'une conversation, et un outil ajoute au serveur
+    n'y apparait qu'a la conversation suivante. Pour ne pas attendre, le
+    parametre sujet de lieux_cycle accepte « action:nom clef=valeur ... »
+    et route vers l'outil voulu. Les valeurs oui, vrai et true valent
+    vrai. Exemple : « action:migrer appliquer=oui ».
+    """
+    morceaux = texte.strip().split()
+    if not morceaux:
+        return {"refuse": True, "raison": "Aucune action."}
+    nom = morceaux[0].lower()
+    params = {}
+    for m in morceaux[1:]:
+        if "=" in m:
+            k, v = m.split("=", 1)
+            params[k.strip()] = v.strip()
+
+    def vrai(k):
+        return str(params.get(k, "")).lower() in ("oui", "vrai", "true", "1")
+
+    if nom == "preparer":
+        return lieux_preparer()
+    if nom == "migrer":
+        return lieux_migrer_ancienne_grille(appliquer=vrai("appliquer"), source=params.get("source", "Propositions"))
+    if nom == "construire":
+        return lieux_construire_attributions()
+    if nom == "vue":
+        return lieux_vue_actuelle(date=params.get("date", ""))
+    if nom == "planification":
+        return lieux_planification(date=params.get("date", ""))
+    if nom == "charte":
+        return lieux_poser_la_charte()
+    if nom == "ressources":
+        return lieux_synchroniser_ressources(confirmer=vrai("confirmer"))
+    if nom == "droits":
+        return lieux_droits_agendas(confirmer=vrai("confirmer"))
+    if nom == "agendas":
+        bureaux = [b for b in params.get("bureaux", "").split(",") if b]
+        return lieux_publier_agendas(confirmer=vrai("confirmer"), bureaux=bureaux or None)
+    if nom == "retablir":
+        return lieux_retablir_journee(identifiant_bureau=params.get("bureau", ""), date=params.get("date", ""))
+    if nom == "patients":
+        return lieux_publier_vers_patients(confirmer=vrai("confirmer"))
+    if nom == "effectif":
+        return lieux_renvoyer_vers_effectif(confirmer=vrai("confirmer"))
+    return {"refuse": True, "raison": "Action inconnue : " + nom}
+
+
 @mcp.tool()
 @tolerant
 def lieux_cycle(sujet: str = ""):
@@ -2344,7 +2395,13 @@ def lieux_cycle(sujet: str = ""):
     le retour vers l'effectif, les descriptions de ressources et les
     agendas de salles restent des gestes separes, parce qu'ils sortent du
     classeur et se voient ailleurs.
+
+    Un sujet de la forme « action:nom clef=valeur » route vers un autre
+    outil de ce module, voir _pont. C'est le passage a emprunter quand le
+    client n'a pas encore rafraichi sa liste d'outils.
     """
+    if str(sujet or "").startswith("action:"):
+        return _pont(str(sujet)[7:])
     attributions = lieux_construire_attributions(sujet=sujet)
     vue = lieux_vue_actuelle(sujet=sujet)
     planification = lieux_planification(sujet=sujet)
