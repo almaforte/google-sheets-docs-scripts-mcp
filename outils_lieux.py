@@ -1491,17 +1491,29 @@ def _premier_du_mois_suivant() -> str:
     return datetime.date(annee, mois, 1).isoformat()
 
 
+def _presence_administrative(remarque) -> bool:
+    """Ligne issue du bloc ADMIN de l'ancienne grille.
+
+    Elle dit qui de l'administration est present ce jour-la a Crissier,
+    pas qu'une salle est prise : elle vit dans le registre et dans
+    l'effectif, jamais dans les grilles ni dans les agendas de salles.
+    """
+    return "BLOC ADMIN" in _normaliser(remarque)
+
+
 def _actives_au(date_iso: str, sujet: str = ""):
     registre = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)
     entetes = registre[0]
     i = {nom: _colonne(entetes, nom) for nom in [
         "Collaborateur", "Identifiant du bureau", "Bureau", "Bâtiment",
-        "Jour", "Demi-journée", "Date de début", "Date de fin", "Statut",
+        "Jour", "Demi-journée", "Date de début", "Date de fin", "Statut", "Remarque",
     ]}
     actives = {}
     for ligne in registre[1:]:
         statut = _cellule(ligne, i["Statut"])
         if statut not in ("Active", "Confirmée", "Proposée"):
+            continue
+        if _presence_administrative(_cellule(ligne, i["Remarque"])):
             continue
         debut = _date(_cellule(ligne, i["Date de début"])) or _cellule(ligne, i["Date de début"])
         fin = _date(_cellule(ligne, i["Date de fin"])) or _cellule(ligne, i["Date de fin"])
@@ -1708,7 +1720,7 @@ def _rythme_par_bureau(sujet: str = ""):
     entetes = registre[0]
     i = {nom: _colonne(entetes, nom) for nom in [
         "Collaborateur", "Identifiant du bureau", "Jour", "Demi-journée",
-        "Date de début", "Date de fin", "Statut",
+        "Date de début", "Date de fin", "Statut", "Remarque",
     ]}
     jour_meme = _aujourdhui()
     par_bureau = {}
@@ -1717,6 +1729,8 @@ def _rythme_par_bureau(sujet: str = ""):
         if not identifiant:
             continue
         if _cellule(ligne, i["Statut"]) not in ("Active", "Confirmée"):
+            continue
+        if _presence_administrative(_cellule(ligne, i["Remarque"])):
             continue
         debut = _date(_cellule(ligne, i["Date de début"]))
         fin = _date(_cellule(ligne, i["Date de fin"]))
@@ -1839,9 +1853,13 @@ def _blocs_agenda(sujet: str = ""):
         "Jour", "Demi-journée", "Date de début", "Date de fin", "Statut", "Remarque",
     ]}
     loin = datetime.date(2999, 1, 1)
+    origine = datetime.date(2000, 1, 1)
     groupes = {}
     for ligne in registre[1:]:
-        if _cellule(ligne, i["Statut"]) not in ("Active", "Confirmée", "Proposée"):
+        statut = _cellule(ligne, i["Statut"])
+        if statut not in ("Active", "Confirmée", "Proposée"):
+            continue
+        if _presence_administrative(_cellule(ligne, i["Remarque"])):
             continue
         identifiant = _cellule(ligne, i["Identifiant du bureau"])
         personne = _cellule(ligne, i["Collaborateur"])
@@ -1851,9 +1869,13 @@ def _blocs_agenda(sujet: str = ""):
             continue
         debut_iso = _date(_cellule(ligne, i["Date de début"]))
         fin_iso = _date(_cellule(ligne, i["Date de fin"]))
-        if not debut_iso:
+        if not debut_iso and statut == "Proposée":
             continue
-        debut = datetime.date.fromisoformat(debut_iso)
+        # Une ligne sans date de debut est une occupation reprise de
+        # l'ancienne grille, en place depuis avant le registre : son bloc
+        # part de l'origine, et sa cle porte une date vide, stable d'un
+        # jour a l'autre.
+        debut = datetime.date.fromisoformat(debut_iso) if debut_iso else origine
         fin = datetime.date.fromisoformat(fin_iso) if fin_iso else loin
         if fin < debut:
             continue
@@ -1880,14 +1902,16 @@ def _blocs_agenda(sujet: str = ""):
             bloc = "journee" if len(actives) == 2 else ("matin" if actives[0] == "Matin" else "apres-midi")
             blocs.append({
                 "personne": personne, "identifiant": identifiant, "jour": jour, "bloc": bloc,
-                "debut": a, "fin": None if fin_bloc >= loin - datetime.timedelta(days=1) else fin_bloc,
+                "debut": None if a <= origine else a,
+                "fin": None if fin_bloc >= loin - datetime.timedelta(days=1) else fin_bloc,
             })
     return blocs
 
 
 def _cle_bloc(b) -> str:
     return "|".join([b["identifiant"], b["jour"], b["bloc"], b["personne"],
-                     b["debut"].isoformat(), b["fin"].isoformat() if b["fin"] else ""])
+                     b["debut"].isoformat() if b["debut"] else "",
+                     b["fin"].isoformat() if b["fin"] else ""])
 
 
 def _premiere_occurrence(debut: datetime.date, jour: str) -> datetime.date:
@@ -1964,13 +1988,15 @@ def lieux_publier_agendas(confirmer: bool = False, bureaux: list = None, sujet: 
             "inchanges": plan["inchanges"],
             "apercu_creations": [{
                 "salle": fiches[b["identifiant"]]["bureau"], "personne": b["personne"], "jour": b["jour"],
-                "bloc": b["bloc"], "du": b["debut"].isoformat(), "au": b["fin"].isoformat() if b["fin"] else "",
+                "bloc": b["bloc"], "du": b["debut"].isoformat() if b["debut"] else "",
+                "au": b["fin"].isoformat() if b["fin"] else "",
             } for b in plan["a_creer"][:30]],
             "apercu_clotures": [c["cle"] for c in plan["a_clore"][:30]],
             "echecs": plan.get("echecs", []),
         }
 
     crees, clos, echecs = 0, 0, list(plan.get("echecs", []))
+    aujourd_hui = datetime.date.today()
     for b in plan["a_creer"]:
         fiche = fiches[b["identifiant"]]
         if b["bloc"] == "journee":
@@ -1982,7 +2008,10 @@ def lieux_publier_agendas(confirmer: bool = False, bureaux: list = None, sujet: 
         else:
             h_debut, h_fin = heures["Après-midi"]
             libelle = "après-midi"
-        premiere = _premiere_occurrence(b["debut"], b["jour"])
+        # Une serie ne remonte jamais dans le passe : elle part du jour
+        # meme, ou de la date de debut si elle est a venir.
+        depart = max(b["debut"] or aujourd_hui, aujourd_hui)
+        premiere = _premiere_occurrence(depart, b["jour"])
         if b["fin"] and premiere > b["fin"]:
             continue
         regle = "RRULE:FREQ=WEEKLY;BYDAY=" + JOUR_RRULE[_normaliser(b["jour"])]
@@ -1991,8 +2020,8 @@ def lieux_publier_agendas(confirmer: bool = False, bureaux: list = None, sujet: 
         corps = {
             "summary": b["personne"],
             "description": (
-                "Occupation standard, " + b["jour"].lower() + " " + libelle + ", depuis le "
-                + _jolie_date(b["debut"].isoformat())
+                "Occupation standard, " + b["jour"].lower() + " " + libelle
+                + (", depuis le " + _jolie_date(b["debut"].isoformat()) if b["debut"] else ", en place avant le registre")
                 + (", jusqu'au " + _jolie_date(b["fin"].isoformat()) if b["fin"] else "") + ".\n"
                 "Posée par Almaval - Lieux. Ne pas modifier à la main : un changement durable "
                 "passe par l'onglet Propositions du classeur des lieux. Pour libérer une "
@@ -2266,11 +2295,15 @@ def lieux_poser_la_charte(sujet: str = ""):
                     "startColumnIndex": min(colonnes_bureaux),
                     "endColumnIndex": max(colonnes_bureaux) + 1,
                 })
-    if plages_couleurs:
+    # Une regle par onglet : les plages d'une regle doivent toutes etre sur la meme grille.
+    par_onglet = {}
+    for plage in plages_couleurs:
+        par_onglet.setdefault(plage["sheetId"], []).append(plage)
+    for plages in par_onglet.values():
         for valeur, couleur in COULEURS_TYPE.items():
             requetes.append({"addConditionalFormatRule": {
                 "rule": {
-                    "ranges": plages_couleurs,
+                    "ranges": plages,
                     "booleanRule": {
                         "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
                         "format": {"backgroundColor": _rvb(couleur)},
@@ -2293,10 +2326,13 @@ def lieux_poser_la_charte(sujet: str = ""):
                 "booleanRule": {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
                                 "format": {"backgroundColor": _rvb(couleur)}},
             }, "index": 0}})
+        # Une proposition sans date de debut ne peut pas etre planifiee :
+        # c'est la seule date vide qui soit une faute. Une ligne Active
+        # sans date est une occupation reprise de l'ancienne grille.
         requetes.append({"addConditionalFormatRule": {"rule": {
             "ranges": [{"sheetId": sid, "startRowIndex": 1, "startColumnIndex": i_debut, "endColumnIndex": i_debut + 1}],
             "booleanRule": {"condition": {"type": "CUSTOM_FORMULA", "values": [
-                {"userEnteredValue": "=ET(" + _lettre(i_debut) + "2=\"\";A2<>\"\")"}]},
+                {"userEnteredValue": "=ET(" + _lettre(i_debut) + "2=\"\";" + _lettre(i_statut) + "2=\"Proposée\")"}]},
                 "format": {"backgroundColor": _rvb(ROUGE)}},
         }, "index": 0}})
 
