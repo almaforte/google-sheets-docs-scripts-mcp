@@ -26,6 +26,11 @@ Deux genres de schema
 Police : Manjari, telechargee une fois depuis le depot public des
 polices Google et gardee dans le dossier temporaire du serveur ; a
 defaut, la police de secours de Pillow.
+
+Palette (14.09.2026, « moins fluo ») : les couleurs pleines de la
+charte servent aux classeurs ; dans un schema on les adoucit, or pale
+pour les couloirs, liseres clairs, fleches grises, texte en teal doux
+et sans gras, sinon la page crie.
 """
 
 import io
@@ -40,12 +45,16 @@ from main import mcp, tolerant, _docs, _drive
 
 TEAL = "#128da0"
 DORE = "#f7cb4d"
-JAUNE = "#fff2cc"
-VIOLET = "#efebf7"
-SAUMON = "#ffe6dd"
+JAUNE = "#fdf6dc"
+VIOLET = "#f1eef8"
+SAUMON = "#fbe9e3"
 GRIS = "#666666"
 GRIS_CLAIR = "#e6e6e6"
 BLANC = "#ffffff"
+DORE_PALE = "#fbe9b8"
+LISERE = "#b9d3d9"
+TEAL_DOUX = "#2f8a9a"
+FLECHE = "#9a9a9a"
 
 FONDS = {"saisie": JAUNE, "moteur": VIOLET, "decision": SAUMON, "lecture": BLANC}
 LEGENDE = (("Une personne saisit", JAUNE), ("Le moteur écrit", VIOLET),
@@ -115,7 +124,7 @@ def _pointe(d, p, sens, ech):
         pts = [(x, y), (x - s, y - s), (x - s, y + s)]
     else:
         pts = [(x, y), (x + s, y - s), (x + s, y + s)]
-    d.polygon(pts, fill=GRIS)
+    d.polygon(pts, fill=FLECHE)
 
 
 # ------------------------------------------------------------- dessin
@@ -147,9 +156,9 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
     larg_couloir = (L - 2 * marge) // n
     ecart = 22 * ech
     bas_legende = 54 * ech if legende else 0
-    f_titre = _police("bold", 26 * ech)
-    f_acteur = _police("bold", 21 * ech)
-    f_quoi = _police("bold", 21 * ech)
+    f_titre = _police("regular", 25 * ech)
+    f_acteur = _police("bold", 19 * ech)
+    f_quoi = _police("regular", 21 * ech)
     f_ou = _police("regular", 17 * ech)
     f_num = _police("bold", 17 * ech)
     f_leg = _police("regular", 16 * ech)
@@ -175,17 +184,17 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
     im = Image.new("RGB", (L, H), BLANC)
     d = ImageDraw.Draw(im)
     if titre:
-        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL)
+        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL_DOUX)
 
     y0 = haut_titre
     for k, acteur in enumerate(acteurs):
         x0 = marge + k * larg_couloir
-        d.rectangle([x0, y0, x0 + larg_couloir - 6 * ech, y0 + haut_entete], fill=DORE)
+        d.rectangle([x0, y0, x0 + larg_couloir - 6 * ech, y0 + haut_entete], fill=DORE_PALE)
         lignes = _couper(acteur, f_acteur, larg_couloir - 24 * ech, d)[:2]
         ty = y0 + (haut_entete - len(lignes) * 24 * ech) / 2
         for l in lignes:
             tw = d.textlength(l, font=f_acteur)
-            d.text((x0 + (larg_couloir - 6 * ech - tw) / 2, ty), l, font=f_acteur, fill=TEAL)
+            d.text((x0 + (larg_couloir - 6 * ech - tw) / 2, ty), l, font=f_acteur, fill=GRIS)
             ty += 24 * ech
         d.rectangle([x0, y0 + haut_entete, x0 + larg_couloir - 6 * ech, H - 14 * ech - bas_legende],
                     fill=BLANC, outline=GRIS_CLAIR, width=ech)
@@ -194,16 +203,16 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
     y = y0 + haut_entete + 14 * ech
     for i, (e, (k, x0, x1, tx, larg_txt, lq, lo, h)) in enumerate(zip(etapes, boites)):
         d.rounded_rectangle([x0, y, x1, y + h], radius=8 * ech,
-                            fill=FONDS.get(e.get("nature", "lecture"), BLANC), outline=TEAL, width=2 * ech)
-        r = 14 * ech
+                            fill=FONDS.get(e.get("nature", "lecture"), BLANC), outline=LISERE, width=ech)
+        r = 13 * ech
         cx, cy = x0 + 20 * ech, y + 20 * ech
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=TEAL)
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=TEAL_DOUX)
         num = str(i + 1)
         tw = d.textlength(num, font=f_num)
         d.text((cx - tw / 2, cy - 12 * ech), num, font=f_num, fill=BLANC)
         ty = y + 9 * ech
         for l in lq:
-            d.text((tx, ty), l, font=f_quoi, fill=TEAL)
+            d.text((tx, ty), l, font=f_quoi, fill=TEAL_DOUX)
             ty += int_quoi
         ty += 3 * ech
         for l in lo:
@@ -217,7 +226,7 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
         (cx1, ya1, yb1, xa1, xb1) = centres[i]
         if cx0 == cx1:
             p0, p1 = (cx0, yb0), (cx1, ya1)
-            d.line([p0, p1], fill=GRIS, width=3 * ech)
+            d.line([p0, p1], fill=FLECHE, width=2 * ech)
             _pointe(d, p1, "bas", ech)
         else:
             if cx1 > cx0:
@@ -227,14 +236,14 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
                 p0 = (xa0, (ya0 + yb0) // 2)
                 p1 = (xb1, (ya1 + yb1) // 2)
             xm = (p0[0] + p1[0]) // 2 + ((i % 3) - 1) * 7 * ech
-            d.line([p0, (xm, p0[1]), (xm, p1[1]), p1], fill=GRIS, width=3 * ech, joint="curve")
+            d.line([p0, (xm, p0[1]), (xm, p1[1]), p1], fill=FLECHE, width=2 * ech, joint="curve")
             _pointe(d, p1, "droite" if cx1 > cx0 else "gauche", ech)
 
     if legende:
         y = H - 46 * ech
         x = marge
         for nom, fond in LEGENDE:
-            d.rounded_rectangle([x, y, x + 30 * ech, y + 20 * ech], radius=4 * ech, fill=fond, outline=TEAL, width=ech)
+            d.rounded_rectangle([x, y, x + 30 * ech, y + 20 * ech], radius=4 * ech, fill=fond, outline=LISERE, width=ech)
             d.text((x + 38 * ech, y - 1 * ech), nom, font=f_leg, fill=GRIS)
             x += 38 * ech + d.textlength(nom, font=f_leg) + 34 * ech
     return im, ech
@@ -247,8 +256,8 @@ def _dessiner_couches(titre, couches):
     marge = 20 * ech
     haut_titre = 62 * ech if titre else 14 * ech
     ecart = 30 * ech
-    f_titre = _police("bold", 26 * ech)
-    f_lib = _police("bold", 23 * ech)
+    f_titre = _police("regular", 25 * ech)
+    f_lib = _police("regular", 23 * ech)
     f_det = _police("regular", 18 * ech)
     x0, x1 = marge + 60 * ech, L - marge - 60 * ech
     sonde = ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -261,14 +270,14 @@ def _dessiner_couches(titre, couches):
     im = Image.new("RGB", (L, H), BLANC)
     d = ImageDraw.Draw(im)
     if titre:
-        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL)
+        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL_DOUX)
     y = haut_titre
     for i, (c, (lq, lo, h)) in enumerate(zip(couches, boites)):
         d.rounded_rectangle([x0, y, x1, y + h], radius=8 * ech,
-                            fill=FONDS.get(c.get("nature", "lecture"), BLANC), outline=TEAL, width=2 * ech)
+                            fill=FONDS.get(c.get("nature", "lecture"), BLANC), outline=LISERE, width=ech)
         ty = y + 9 * ech
         for l in lq:
-            d.text((x0 + 16 * ech, ty), l, font=f_lib, fill=TEAL)
+            d.text((x0 + 16 * ech, ty), l, font=f_lib, fill=TEAL_DOUX)
             ty += 28 * ech
         ty += 3 * ech
         for l in lo:
@@ -276,7 +285,7 @@ def _dessiner_couches(titre, couches):
             ty += 22 * ech
         if i < len(couches) - 1:
             cx = (x0 + x1) // 2
-            d.line([(cx, y + h), (cx, y + h + ecart)], fill=GRIS, width=3 * ech)
+            d.line([(cx, y + h), (cx, y + h + ecart)], fill=FLECHE, width=2 * ech)
             _pointe(d, (cx, y + h + ecart), "bas", ech)
         y += h + ecart
     return im, ech
