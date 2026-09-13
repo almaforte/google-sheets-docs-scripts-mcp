@@ -1917,6 +1917,11 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
         + _fusions_entetes(sid, normalise)
         + _fusions_demi_journees(sid, normalise)
         + _largeurs(sid, _mesures_grille(normalise))
+        # les hauteurs de ligne survivent au nettoyage des formats : on les
+        # remet toutes a l'ordinaire avant de relever les en-tetes sur deux lignes
+        + [{"updateDimensionProperties": {
+            "range": {"sheetId": sid, "dimension": "ROWS", "startIndex": 0, "endIndex": len(normalise)},
+            "properties": {"pixelSize": 21}, "fields": "pixelSize"}}]
         + [{"updateDimensionProperties": {
             "range": {"sheetId": sid, "dimension": "ROWS", "startIndex": r, "endIndex": r + 1},
             "properties": {"pixelSize": 30}, "fields": "pixelSize"}}
@@ -3126,10 +3131,19 @@ def _pont(texte: str):
     Exemples : « action:migrer appliquer=oui »,
     « action:migrer appliquer=oui source="Archive - Propositions 2026" ».
     """
+    # « schema {json} » et « apercu {json} » : passage vers outils_schemas,
+    # dont les outils ne sont pas encore dans la liste que le client garde
+    # en cache. Le reste de la ligne est du JSON, pas des clefs=valeurs.
+    brut = texte.strip()
+    for prefixe, nom_outil in (("schema ", "schema_poser"), ("apercu ", "schema_apercu")):
+        if brut.startswith(prefixe):
+            import json as _json
+            import outils_schemas
+            return getattr(outils_schemas, nom_outil)(**_json.loads(brut[len(prefixe):]))
     try:
-        morceaux = shlex.split(texte.strip())
+        morceaux = shlex.split(brut)
     except ValueError:
-        morceaux = texte.strip().split()
+        morceaux = brut.split()
     if not morceaux:
         return {"refuse": True, "raison": "Aucune action."}
     nom = morceaux[0].lower()
