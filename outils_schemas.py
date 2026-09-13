@@ -327,6 +327,14 @@ def _deposer(donnees: bytes, nom: str, dossier_id: str):
     return fichier
 
 
+def _ranger(fichier_id: str, dossier_id: str):
+    """Deplace le fichier dans le dossier demande, en retirant tous ses parents."""
+    actuel = _drive().files().get(fileId=fichier_id, fields="parents", supportsAllDrives=True).execute()
+    _drive().files().update(fileId=fichier_id, addParents=dossier_id,
+                            removeParents=",".join(actuel.get("parents", [])),
+                            supportsAllDrives=True, fields="id,parents").execute()
+
+
 def _inserer(document_id: str, fichier_id: str, largeur_px: int, hauteur_px: int,
              apres_texte: str, largeur_points: float):
     """Insere l'image dans son propre paragraphe centre, apres le paragraphe
@@ -409,8 +417,15 @@ def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str
             acteurs = sorted({e.get("acteur", "") for e in etapes})
         im, ech = _dessiner_couloirs(titre, acteurs, etapes, legende=legende)
     donnees, largeur_px, hauteur_px = _png(im, ech)
-    fichier = _deposer(donnees, nom if nom.lower().endswith(".png") else nom + ".png", dossier_id)
+    # Le PNG est depose d'abord dans le Drive personnel du compte, ou le
+    # partage par lien est permis, puis deplace dans le dossier demande
+    # une fois insere : un Drive partage qui interdit le partage hors
+    # domaine (celui du chantier des BDU, 13.09.2026) refuse la permission
+    # temporaire, et Docs ne peut pas lire l'image.
+    fichier = _deposer(donnees, nom if nom.lower().endswith(".png") else nom + ".png", "")
     index = _inserer(document_id, fichier["id"], largeur_px, hauteur_px, apres_texte, largeur_points)
+    if dossier_id:
+        _ranger(fichier["id"], dossier_id)
     return {"image_id": fichier["id"], "image_url": fichier.get("webViewLink"),
             "octets": len(donnees), "pixels": [largeur_px, hauteur_px], "index": index,
             "police": "Manjari" if _chemin_police("bold") else "secours",
