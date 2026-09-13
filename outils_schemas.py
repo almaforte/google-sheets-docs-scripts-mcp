@@ -352,8 +352,11 @@ def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str
     apres_texte : debut du paragraphe apres lequel poser l'image ; vide,
     l'image va en fin de document. dossier_id : dossier Drive du PNG.
     largeur_points : largeur dans la page, 470 points remplit une page A4
-    aux marges du gabarit.
+    aux marges du gabarit. genre « titres » ne dessine rien et renvoie
+    les titres du document avec leurs liens, comme document_titres.
     """
+    if genre == "titres":
+        return document_titres(document_id)
     if spec_json:
         spec = json.loads(spec_json)
         titre = spec.get("titre", titre)
@@ -402,3 +405,29 @@ def schema_apercu(nom: str, genre: str = "couloirs", titre: str = "", acteurs: l
     return {"image_id": fichier["id"], "image_url": fichier.get("webViewLink"),
             "octets": len(donnees), "pixels": [largeur_px, hauteur_px],
             "police": "Manjari" if _chemin_police("bold") else "secours"}
+
+
+@mcp.tool()
+@tolerant
+def document_titres(document_id: str):
+    """Les titres d'un document avec leur ancre : pour envoyer le lien d'un
+    chapitre precis. Chaque entree porte le niveau, le texte et l'URL
+    docs.google.com/document/d/ID/edit#heading=ID_DU_TITRE."""
+    document = _docs().documents().get(documentId=document_id).execute()
+    base = "https://docs.google.com/document/d/" + document_id + "/edit#heading="
+    titres = []
+    for element in document.get("body", {}).get("content", []):
+        p = element.get("paragraph")
+        if not p:
+            continue
+        style = p.get("paragraphStyle", {})
+        nom_style = style.get("namedStyleType", "")
+        if not nom_style.startswith("HEADING_"):
+            continue
+        texte = "".join(e.get("textRun", {}).get("content", "") for e in p.get("elements", [])).strip()
+        if not texte:
+            continue
+        ancre = style.get("headingId", "")
+        titres.append({"niveau": int(nom_style[-1]), "texte": texte, "ancre": ancre,
+                       "url": base + ancre if ancre else ""})
+    return {"document_id": document_id, "titres": titres}
