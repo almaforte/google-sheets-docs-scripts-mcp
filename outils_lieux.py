@@ -1912,7 +1912,11 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
         _requetes_charte_bureaux(sid, normalise, couleurs)
         + _fusions_entetes(sid, normalise)
         + _fusions_demi_journees(sid, normalise)
-        + _largeurs(sid, _mesures_grille(normalise))}).execute()
+        + _largeurs(sid, _mesures_grille(normalise))
+        + [{"updateDimensionProperties": {
+            "range": {"sheetId": sid, "dimension": "ROWS", "startIndex": r, "endIndex": r + 1},
+            "properties": {"pixelSize": 30}, "fields": "pixelSize"}}
+           for r in _hauteurs_entetes(normalise, _mesures_grille(normalise))]}).execute()
 
     _journaliser([[_maintenant(), "Publication", "Copie vers Almaval - Patients", ONGLET_PATIENTS, "",
                    str(len(normalise)), "Terminé", "vue du " + _aujourdhui()]], sujet=sujet)
@@ -2577,7 +2581,12 @@ def _mesures_grille(grille, longueurs=None):
         for r in (r_entete - 1, r_entete + 1):
             ignorees.add((r, bloc["colonne_jour"]))
             ignorees.add((r, bloc["colonne_demi"]))
+        # le nom du site compte par son mot le plus long : il se renvoie
+        # a la ligne, mais aucun de ses mots ne doit etre coupe
         ignorees.add((r_entete, bloc["colonne_demi"]))
+        mots = str(_cellule(grille[r_entete], bloc["colonne_demi"])).split()
+        c = bloc["colonne_demi"]
+        longueurs[c] = max(longueurs.get(c, 0), max((len(m) for m in mots), default=0))
     for r, ligne in enumerate(grille):
         if r == 0:
             continue
@@ -2586,6 +2595,24 @@ def _mesures_grille(grille, longueurs=None):
                 continue
             longueurs[c] = max(longueurs.get(c, 0), len(str(_cellule(ligne, c))))
     return longueurs
+
+
+def _largeur_pixels(longueur):
+    """Largeur d'une colonne, en pixels, pour une longueur de contenu."""
+    return 20 if longueur == 0 else int(min(150, max(42, 12 + 4.7 * longueur)))
+
+
+def _hauteurs_entetes(grille, longueurs):
+    """Requetes de hauteur des lignes d'en-tete dont le nom du site se
+    renvoie a la ligne : deux lignes de texte demandent 30 pixels."""
+    lignes = []
+    for bloc in _blocs(grille):
+        r = bloc["ligne_entete"]
+        nom = str(_cellule(grille[r], bloc["colonne_demi"])).strip()
+        largeur = _largeur_pixels(longueurs.get(bloc["colonne_demi"], 0))
+        if nom and 12 + 4.7 * len(nom) > largeur:
+            lignes.append(r)
+    return lignes
 
 
 def _mesures(sujet: str = ""):
@@ -2610,11 +2637,10 @@ def _largeurs(identifiant: int, longueurs):
     """Requetes de largeur de colonne, a partir des longueurs mesurees."""
     requetes = []
     for c in sorted(longueurs):
-        taille = 20 if longueurs[c] == 0 else int(min(150, max(42, 12 + 4.7 * longueurs[c])))
         requetes.append({"updateDimensionProperties": {
             "range": {"sheetId": identifiant, "dimension": "COLUMNS",
                       "startIndex": c, "endIndex": c + 1},
-            "properties": {"pixelSize": taille}, "fields": "pixelSize"}})
+            "properties": {"pixelSize": _largeur_pixels(longueurs[c])}, "fields": "pixelSize"}})
     return requetes
 
 
@@ -2625,7 +2651,17 @@ def _appliquer_largeurs(sujet: str = ""):
     requetes = []
     for titre in (ONGLET_GRILLE, ONGLET_VUE, ONGLET_PLANIFICATION):
         if titre in proprietes:
-            requetes.extend(_largeurs(proprietes[titre]["sheetId"], longueurs))
+            identifiant = proprietes[titre]["sheetId"]
+            requetes.extend(_largeurs(identifiant, longueurs))
+            try:
+                grille = _lire(titre, sujet=sujet)
+            except Exception:  # noqa: BLE001
+                continue
+            for r in _hauteurs_entetes(grille, longueurs):
+                requetes.append({"updateDimensionProperties": {
+                    "range": {"sheetId": identifiant, "dimension": "ROWS",
+                              "startIndex": r, "endIndex": r + 1},
+                    "properties": {"pixelSize": 30}, "fields": "pixelSize"}})
     if requetes:
         _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
     return len(requetes)
@@ -2720,9 +2756,17 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
                 "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": 1,
                           "startColumnIndex": 0, "endColumnIndex": 1},
                 "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT",
+                                               "wrapStrategy": "OVERFLOW_CELL",
                                                "textFormat": dict(texte, bold=True)}},
                 "fields": ("userEnteredFormat.horizontalAlignment,"
+                           "userEnteredFormat.wrapStrategy,"
                            "userEnteredFormat.textFormat.bold," + masque)}},
+            # le titre deborde a droite sur des cellules vides : la ligne
+            # garde sa hauteur ordinaire
+            {"updateDimensionProperties": {
+                "range": {"sheetId": identifiant, "dimension": "ROWS",
+                          "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 21}, "fields": "pixelSize"}},
         ]
 
     for bloc in _blocs(grille):
@@ -2908,10 +2952,15 @@ def lieux_poser_la_charte(sujet: str = ""):
                           "startColumnIndex": 0, "endColumnIndex": 1},
                 "cell": {"userEnteredFormat": {
                     "horizontalAlignment": "LEFT",
+                    "wrapStrategy": "OVERFLOW_CELL",
                     "textFormat": dict(texte_commun, bold=True),
                 }},
-                "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold," + masque_texte,
+                "fields": ("userEnteredFormat.horizontalAlignment,userEnteredFormat.wrapStrategy,"
+                           "userEnteredFormat.textFormat.bold," + masque_texte),
             }})
+            requetes.append({"updateDimensionProperties": {
+                "range": {"sheetId": identifiant, "dimension": "ROWS", "startIndex": 0, "endIndex": 1},
+                "properties": {"pixelSize": 21}, "fields": "pixelSize"}})
         traites.append(titre)
 
     # Validation bloquante et texte brut sur les cellules d'occupant de Propositions
