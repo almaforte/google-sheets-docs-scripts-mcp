@@ -185,13 +185,33 @@ def _lire(onglet: str, classeur: str = ID_LIEUX, sujet: str = ""):
     return reponse.get("values", [])
 
 
-def _ecrire(onglet: str, plage: str, valeurs, classeur: str = ID_LIEUX, sujet: str = ""):
+def _ecrire(onglet: str, plage: str, valeurs, classeur: str = ID_LIEUX, sujet: str = "", mode: str = "RAW"):
+    """Ecrit une plage. mode USER_ENTERED pour des formules ou des dates."""
     return _feuilles(sujet).values().update(
         spreadsheetId=classeur,
         range="'" + onglet + "'!" + plage,
-        valueInputOption="RAW",
+        valueInputOption=mode,
         body={"values": valeurs},
     ).execute()
+
+
+def _ecrire_registre(lignes, sujet: str = ""):
+    """Ecrit les lignes d'Attributions, les deux dates en vraies dates.
+
+    Le texte est ecrit brut ; les colonnes Date de debut et Date de fin
+    sont reecrites en USER_ENTERED pour que Google Sheets en fasse des
+    dates, ce que la Planification par formules compare a la date
+    choisie. Les colonnes sont trouvees par leur intitule.
+    """
+    if not lignes:
+        return
+    entetes = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)[0]
+    i_debut = _colonne(entetes, "Date de début")
+    i_fin = _colonne(entetes, "Date de fin")
+    _ecrire(ONGLET_ATTRIBUTIONS, "A2:K" + str(len(lignes) + 1), lignes, sujet=sujet)
+    dates = [[_cellule(l, i_debut), _cellule(l, i_fin)] for l in lignes]
+    plage = _lettre(i_debut) + "2:" + _lettre(i_fin) + str(len(lignes) + 1)
+    _ecrire(ONGLET_ATTRIBUTIONS, plage, dates, sujet=sujet, mode="USER_ENTERED")
 
 
 def _vider(onglet: str, classeur: str = ID_LIEUX, sujet: str = ""):
@@ -1329,8 +1349,7 @@ def lieux_migrer_ancienne_grille(appliquer: bool = False, source: str = "Proposi
         spreadsheetId=ID_LIEUX, range="'" + ONGLET_ATTRIBUTIONS + "'!A2:K", body={}
     ).execute()
     _ajuster_taille(ONGLET_ATTRIBUTIONS, len(dedoublonnees) + 5, 11, sujet=sujet)
-    if dedoublonnees:
-        _ecrire(ONGLET_ATTRIBUTIONS, "A2:K" + str(len(dedoublonnees) + 1), dedoublonnees, sujet=sujet)
+    _ecrire_registre(dedoublonnees, sujet=sujet)
 
     # 4. Demandes
     _feuilles(sujet).values().clear(
@@ -1342,7 +1361,7 @@ def lieux_migrer_ancienne_grille(appliquer: bool = False, source: str = "Proposi
 
     # 5. vues
     vue = _generer_vue(ONGLET_VUE, jour_meme, sujet=sujet)
-    planification = _generer_vue(ONGLET_PLANIFICATION, _premier_du_mois_suivant(), sujet=sujet)
+    planification = _generer_planification(sujet=sujet)
 
     # 6. onglets obsoletes
     presents = _onglets(sujet=sujet)
@@ -1464,15 +1483,23 @@ def lieux_construire_attributions(sujet: str = ""):
                 statut = "Active"
             garde = list(ancienne)
             garde[i["Statut"]] = statut
+            garde[i["Date de début"]] = debut
+            garde[i["Date de fin"]] = fin
             lignes.append(garde)
             inchange += 1
             continue
         if statut == "Terminée":
-            lignes.append(list(ancienne))
+            garde = list(ancienne)
+            garde[i["Date de début"]] = debut
+            garde[i["Date de fin"]] = fin
+            lignes.append(garde)
             continue
         close = list(ancienne)
+        close[i["Date de début"]] = debut
         if not fin or fin > jour_meme:
             close[i["Date de fin"]] = fin if fin else jour_meme
+        else:
+            close[i["Date de fin"]] = fin
         close[i["Statut"]] = "Terminée" if (close[i["Date de fin"]] < jour_meme or close[i["Date de fin"]] == jour_meme) else "Active"
         if close[i["Statut"]] == "Terminée" and "Retirée de la grille" not in remarque:
             close[i["Remarque"]] = ", ".join(x for x in [remarque, "Retirée de la grille le " + jour_meme] if x)
@@ -1492,8 +1519,7 @@ def lieux_construire_attributions(sujet: str = ""):
         body={},
     ).execute()
     _ajuster_taille(ONGLET_ATTRIBUTIONS, len(lignes) + 5, 11, sujet=sujet)
-    if lignes:
-        _ecrire(ONGLET_ATTRIBUTIONS, "A2:K" + str(len(lignes) + 1), lignes, sujet=sujet)
+    _ecrire_registre(lignes, sujet=sujet)
 
     horodatage = _maintenant()
     journal = [[horodatage, "Attributions", "Construction", "Propositions",
@@ -1601,6 +1627,96 @@ def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
     return {"onglet": onglet, "date": date_iso, "cellules_occupees": poses, "lignes": len(sortie)}
 
 
+def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str) -> str:
+    """Formule d'une cellule de Planification, en francais, sans LET.
+
+    Lit le registre Attributions par intitule de colonne, jamais par
+    lettre, et retient les lignes vivantes a la date choisie en B1 :
+    Active ou Confirmee, ou Proposee avec une date de debut, debut au
+    plus tard a la date, fin au plus tot a la date, sans les presences
+    administratives. Plusieurs personnes sont jointes par une virgule.
+    """
+    registre = "Attributions!$A$2:$Z"
+    entetes = "Attributions!$A$1:$Z$1"
+
+    def col(nom):
+        return 'INDEX(' + registre + ';0;EQUIV("' + nom + '";' + entetes + ';0))'
+
+    return (
+        '=ARRAYFORMULA(SIERREUR(JOINDRE(", ";VRAI;FILTER(' + col("Collaborateur")
+        + ';' + col("Bâtiment") + '=' + site_ref
+        + ';' + col("Bureau") + '=' + bureau_ref
+        + ';' + col("Jour") + '="' + jour + '"'
+        + ';' + col("Demi-journée") + '="' + demi + '"'
+        + ';(' + col("Statut") + '="Active")+(' + col("Statut") + '="Confirmée")+(('
+        + col("Statut") + '="Proposée")*(' + col("Date de début") + '<>""))'
+        + ';(' + col("Date de début") + '="")+(' + col("Date de début") + '<=$B$1)'
+        + ';(' + col("Date de fin") + '="")+(' + col("Date de fin") + '>=$B$1)'
+        + ';ESTERREUR(CHERCHE("bloc ADMIN";' + col("Remarque") + '))'
+        + '));""))'
+    )
+
+
+def _generer_planification(date_iso: str = "", sujet: str = ""):
+    """Planification vivante : la date se choisit en B1, la grille suit.
+
+    Demande d'Alberto du 13.09.2026 : une cellule de date, et tout le
+    tableau se met a jour pour montrer les bureaux vides ou pris a cette
+    date. Chaque cellule de bureau porte une formule qui lit le registre
+    Attributions ; le moteur ne repose que la geometrie et les formules,
+    et ne touche a la date que si on la lui donne ou si elle est vide.
+    """
+    grille = _lire(ONGLET_GRILLE, sujet=sujet)
+    largeur = max((len(l) for l in grille), default=0)
+    sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
+    if not sortie:
+        return {"onglet": ONGLET_PLANIFICATION, "date": "", "cellules_occupees": 0, "lignes": 0}
+
+    existante = _lire(ONGLET_PLANIFICATION, sujet=sujet)
+    date_en_place = _date(_cellule(existante[0], 1)) if existante else ""
+    date_choisie = date_iso or date_en_place or _premier_du_mois_suivant()
+
+    formules = []  # (plage A1, lignes de formules) par bloc
+    for bloc in _blocs(grille):
+        site_ref = "$" + _lettre(bloc["colonne_demi"]) + "$" + str(bloc["ligne_entete"] + 1)
+        colonnes = [c for c, _ in bloc["bureaux"]]
+        c0, c1 = min(colonnes), max(colonnes)
+        lignes_bloc = []
+        jour_courant = ""
+        for decalage in range(12):
+            r = bloc["premiere_ligne"] + decalage
+            if r >= len(sortie):
+                break
+            jour = _cellule(grille[r], bloc["colonne_jour"]) or jour_courant
+            jour_courant = jour
+            demi = _cellule(grille[r], bloc["colonne_demi"])
+            ligne = []
+            for c in range(c0, c1 + 1):
+                if jour and demi and c in colonnes:
+                    bureau_ref = _lettre(c) + "$" + str(bloc["ligne_entete"] + 1)
+                    ligne.append(_formule_planification(site_ref, bureau_ref, jour, demi))
+                else:
+                    ligne.append("")
+                sortie[r][c] = ""
+            lignes_bloc.append(ligne)
+        formules.append((_lettre(c0) + str(bloc["premiere_ligne"] + 1) + ":" + _lettre(c1)
+                         + str(bloc["premiere_ligne"] + len(lignes_bloc)), lignes_bloc))
+
+    sortie[0][0] = ""
+    sortie[0][1] = ""
+    _ecrire_grille(ONGLET_PLANIFICATION, sortie, sujet=sujet)
+    tete = [['="Planification au "&TEXTE($B$1;"dd.mm.yyyy")', _jolie_date(date_choisie)]]
+    _ecrire(ONGLET_PLANIFICATION, "A1:B1", tete, sujet=sujet, mode="USER_ENTERED")
+    for plage, lignes_bloc in formules:
+        _ecrire(ONGLET_PLANIFICATION, plage, lignes_bloc, sujet=sujet, mode="USER_ENTERED")
+
+    poses = sum(1 for occupants in _actives_au(date_choisie, sujet=sujet).values() if occupants)
+    _journaliser([[_maintenant(), ONGLET_PLANIFICATION, "Génération", date_choisie, "", str(poses), "Terminé",
+                   "grille par formules, date en B1, cellules occupées au " + _jolie_date(date_choisie)]], sujet=sujet)
+    return {"onglet": ONGLET_PLANIFICATION, "date": date_choisie, "cellules_occupees": poses,
+            "lignes": len(sortie), "date_en_B1": True}
+
+
 @mcp.tool()
 @tolerant
 def lieux_vue_actuelle(date: str = "", sujet: str = ""):
@@ -1616,10 +1732,12 @@ def lieux_vue_actuelle(date: str = "", sujet: str = ""):
 def lieux_planification(date: str = "", sujet: str = ""):
     """Reconstruit la Planification : le standard a une date choisie.
 
-    Par defaut le premier jour du mois suivant. C'est la grille qui montre
-    les arrivees et les departs deja decides dans le registre.
+    La date vit en B1 de l'onglet et se change a la main, la grille suit
+    par formules. Sans date ici, la date en place est gardee ; a defaut,
+    le premier jour du mois suivant. C'est la grille qui montre les
+    arrivees et les departs deja decides dans le registre.
     """
-    return _generer_vue(ONGLET_PLANIFICATION, _date(date) or _premier_du_mois_suivant(), sujet=sujet)
+    return _generer_planification(_date(date), sujet=sujet)
 
 
 # ------------------------------------------------------------ publications
@@ -2495,6 +2613,27 @@ def lieux_poser_la_charte(sujet: str = ""):
                 "startColumnIndex": min(i_debut, i_fin), "endColumnIndex": max(i_debut, i_fin) + 1,
             }]
             protection["description"] = "Registre écrit par le moteur ; seules les deux dates se saisissent"
+        if titre == ONGLET_PLANIFICATION:
+            # La date en B1 se saisit : cellule jaune, format de date, validation bloquante.
+            cellule_date = {"sheetId": proprietes[titre]["sheetId"], "startRowIndex": 0, "endRowIndex": 1,
+                            "startColumnIndex": 1, "endColumnIndex": 2}
+            protection["unprotectedRanges"] = [cellule_date]
+            protection["description"] = "Grille par formules ; seule la date en B1 se saisit"
+            requetes.append({"repeatCell": {
+                "range": cellule_date,
+                "cell": {"userEnteredFormat": {
+                    "backgroundColor": _rvb(JAUNE),
+                    "numberFormat": {"type": "DATE", "pattern": "dd.mm.yyyy"},
+                    "textFormat": dict(texte_commun, bold=True),
+                }},
+                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.numberFormat,"
+                          "userEnteredFormat.textFormat.bold," + masque_texte,
+            }})
+            requetes.append({"setDataValidation": {
+                "range": cellule_date,
+                "rule": {"condition": {"type": "DATE_IS_VALID"}, "strict": True, "showCustomUi": False,
+                         "inputMessage": "Date à laquelle regarder la planification, par exemple 01.10.2026."},
+            }})
         requetes.append({"addProtectedRange": {"protectedRange": protection}})
 
     _feuilles(sujet).batchUpdate(
