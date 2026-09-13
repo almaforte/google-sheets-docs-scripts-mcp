@@ -317,9 +317,10 @@ def _inserer(document_id: str, fichier_id: str, largeur_px: int, hauteur_px: int
                 }}},
             {"updateParagraphStyle": {
                 "range": {"startIndex": index, "endIndex": index + 2},
-                "paragraphStyle": {"alignment": "CENTER", "spaceAbove": {"magnitude": 6, "unit": "PT"},
+                "paragraphStyle": {"namedStyleType": "NORMAL_TEXT", "alignment": "CENTER",
+                                   "spaceAbove": {"magnitude": 6, "unit": "PT"},
                                    "spaceBelow": {"magnitude": 10, "unit": "PT"}},
-                "fields": "alignment,spaceAbove,spaceBelow"}},
+                "fields": "namedStyleType,alignment,spaceAbove,spaceBelow"}},
         ]
         _docs().documents().batchUpdate(documentId=document_id, body={"requests": requetes}).execute()
     finally:
@@ -338,7 +339,7 @@ def _inserer(document_id: str, fichier_id: str, largeur_px: int, hauteur_px: int
 def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str = "",
                  acteurs: list = None, etapes: list = None, apres_texte: str = "",
                  dossier_id: str = "", largeur_points: float = 470, legende: bool = True,
-                 spec_json: str = ""):
+                 spec_json: str = "", couches: list = None):
     """Dessine un schema a la charte, le depose sur le Drive et l'insere dans un document.
 
     genre : « couloirs » (un couloir par acteur, etapes numerotees et
@@ -346,7 +347,7 @@ def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str
     acteurs : noms des couloirs, dans l'ordre. etapes : liste de
     {acteur, quoi, ou, nature}, nature valant saisie, moteur, decision ou
     lecture. Pour « couches », etapes vaut la liste des couches {quoi, ou,
-    nature}. spec_json peut porter tout cela en une chaine JSON
+    nature}, ou se donne par couches. spec_json peut porter tout cela en une chaine JSON
     {titre, acteurs, etapes} quand le client prefere.
     apres_texte : debut du paragraphe apres lequel poser l'image ; vide,
     l'image va en fin de document. dossier_id : dossier Drive du PNG.
@@ -359,7 +360,7 @@ def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str
         acteurs = spec.get("acteurs", acteurs)
         etapes = spec.get("etapes", spec.get("couches", etapes))
     acteurs = list(acteurs or [])
-    etapes = list(etapes or [])
+    etapes = list(etapes or couches or [])
     if genre == "couches":
         im, ech = _dessiner_couches(titre, etapes)
     else:
@@ -378,7 +379,8 @@ def schema_poser(document_id: str, nom: str, genre: str = "couloirs", titre: str
 @mcp.tool()
 @tolerant
 def schema_apercu(nom: str, genre: str = "couloirs", titre: str = "", acteurs: list = None,
-                  etapes: list = None, dossier_id: str = "", legende: bool = True, spec_json: str = ""):
+                  etapes: list = None, dossier_id: str = "", legende: bool = True, spec_json: str = "",
+                  couches: list = None):
     """Dessine le schema et le depose seulement sur le Drive, sans l'inserer
     nulle part : pour regarder avant de poser. Memes parametres que
     schema_poser, sans document."""
@@ -388,7 +390,7 @@ def schema_apercu(nom: str, genre: str = "couloirs", titre: str = "", acteurs: l
         acteurs = spec.get("acteurs", acteurs)
         etapes = spec.get("etapes", spec.get("couches", etapes))
     acteurs = list(acteurs or [])
-    etapes = list(etapes or [])
+    etapes = list(etapes or couches or [])
     if genre == "couches":
         im, ech = _dessiner_couches(titre, etapes)
     else:
