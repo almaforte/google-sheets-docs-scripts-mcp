@@ -119,73 +119,98 @@ def _pointe(d, p, sens, ech):
 
 
 # ------------------------------------------------------------- dessin
+#
+# Geometrie en unites logiques (ech = 2 pixels par unite au dessin, puis
+# reduction a 1400 px). Une largeur logique de 1200 posee a 470 points
+# dans la page donne 0,39 point par unite : une fonte de 22 unites se lit
+# a 8,6 points, celle de 18 a 7 points. Les boites prennent la hauteur de
+# leur texte, le schema s'allonge au lieu de couper.
+
+LARGEUR = 1200
+HAUTEUR_MAX_POINTS = 600
+
+
+def _hauteur_texte(d, e, f_quoi, f_ou, larg_txt, max_quoi=5, max_ou=3):
+    lq = _couper(e.get("quoi", ""), f_quoi, larg_txt, d)[:max_quoi]
+    lo = _couper(e.get("ou", ""), f_ou, larg_txt, d)[:max_ou] if e.get("ou") else []
+    return lq, lo
+
 
 def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
     from PIL import Image, ImageDraw
     ech = 2
-    L = 1800 * ech
-    marge = 30 * ech
-    haut_titre = 70 * ech if titre else 16 * ech
-    haut_entete = 46 * ech
+    L = LARGEUR * ech
+    marge = 20 * ech
+    haut_titre = 62 * ech if titre else 14 * ech
+    haut_entete = 44 * ech
     n = max(1, len(acteurs))
     larg_couloir = (L - 2 * marge) // n
-    pas = 118 * ech
-    haut_boite = 92 * ech
-    bas_legende = 60 * ech if legende else 0
-    H = haut_titre + haut_entete + pas * len(etapes) + 40 * ech + bas_legende
+    ecart = 22 * ech
+    bas_legende = 54 * ech if legende else 0
+    f_titre = _police("bold", 26 * ech)
+    f_acteur = _police("bold", 21 * ech)
+    f_quoi = _police("bold", 21 * ech)
+    f_ou = _police("regular", 17 * ech)
+    f_num = _police("bold", 17 * ech)
+    f_leg = _police("regular", 16 * ech)
+    int_quoi, int_ou = 26 * ech, 21 * ech
 
+    sonde = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    boites = []
+    for e in etapes:
+        try:
+            k = acteurs.index(e.get("acteur"))
+        except ValueError:
+            k = 0
+        x0 = marge + k * larg_couloir + 10 * ech
+        x1 = marge + (k + 1) * larg_couloir - 16 * ech
+        tx = x0 + 42 * ech
+        larg_txt = x1 - tx - 10 * ech
+        lq, lo = _hauteur_texte(sonde, e, f_quoi, f_ou, larg_txt)
+        h = 10 * ech + len(lq) * int_quoi + (len(lo) * int_ou + 4 * ech if lo else 0) + 10 * ech
+        h = max(h, 46 * ech)
+        boites.append((k, x0, x1, tx, larg_txt, lq, lo, h))
+
+    H = haut_titre + haut_entete + 14 * ech + sum(b[7] + ecart for b in boites) + 14 * ech + bas_legende
     im = Image.new("RGB", (L, H), BLANC)
     d = ImageDraw.Draw(im)
-    f_titre = _police("bold", 22 * ech)
-    f_acteur = _police("bold", 17 * ech)
-    f_quoi = _police("bold", 15 * ech)
-    f_ou = _police("regular", 13 * ech)
-    f_num = _police("bold", 15 * ech)
-    f_leg = _police("regular", 13 * ech)
-
     if titre:
-        d.text((marge, 22 * ech), titre, font=f_titre, fill=TEAL)
+        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL)
 
     y0 = haut_titre
     for k, acteur in enumerate(acteurs):
         x0 = marge + k * larg_couloir
         d.rectangle([x0, y0, x0 + larg_couloir - 6 * ech, y0 + haut_entete], fill=DORE)
-        lignes = _couper(acteur, f_acteur, larg_couloir - 24 * ech, d)
-        ty = y0 + (haut_entete - len(lignes) * 20 * ech) / 2
+        lignes = _couper(acteur, f_acteur, larg_couloir - 24 * ech, d)[:2]
+        ty = y0 + (haut_entete - len(lignes) * 24 * ech) / 2
         for l in lignes:
             tw = d.textlength(l, font=f_acteur)
             d.text((x0 + (larg_couloir - 6 * ech - tw) / 2, ty), l, font=f_acteur, fill=TEAL)
-            ty += 20 * ech
-        d.rectangle([x0, y0 + haut_entete, x0 + larg_couloir - 6 * ech, H - 20 * ech - bas_legende],
+            ty += 24 * ech
+        d.rectangle([x0, y0 + haut_entete, x0 + larg_couloir - 6 * ech, H - 14 * ech - bas_legende],
                     fill=BLANC, outline=GRIS_CLAIR, width=ech)
 
     centres = []
-    for i, e in enumerate(etapes):
-        try:
-            k = acteurs.index(e["acteur"])
-        except ValueError:
-            k = 0
-        x0 = marge + k * larg_couloir + 14 * ech
-        x1 = marge + (k + 1) * larg_couloir - 20 * ech
-        y = y0 + haut_entete + 14 * ech + i * pas
-        d.rounded_rectangle([x0, y, x1, y + haut_boite], radius=8 * ech,
+    y = y0 + haut_entete + 14 * ech
+    for i, (e, (k, x0, x1, tx, larg_txt, lq, lo, h)) in enumerate(zip(etapes, boites)):
+        d.rounded_rectangle([x0, y, x1, y + h], radius=8 * ech,
                             fill=FONDS.get(e.get("nature", "lecture"), BLANC), outline=TEAL, width=2 * ech)
-        r = 13 * ech
-        cx, cy = x0 + 18 * ech, y + 18 * ech
+        r = 14 * ech
+        cx, cy = x0 + 20 * ech, y + 20 * ech
         d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=TEAL)
         num = str(i + 1)
         tw = d.textlength(num, font=f_num)
-        d.text((cx - tw / 2, cy - 11 * ech), num, font=f_num, fill=BLANC)
-        tx = x0 + 40 * ech
-        larg_txt = x1 - tx - 10 * ech
-        ty = y + 8 * ech
-        for l in _couper(e.get("quoi", ""), f_quoi, larg_txt, d)[:3]:
+        d.text((cx - tw / 2, cy - 12 * ech), num, font=f_num, fill=BLANC)
+        ty = y + 9 * ech
+        for l in lq:
             d.text((tx, ty), l, font=f_quoi, fill=TEAL)
-            ty += 18 * ech
-        for l in _couper(e.get("ou", ""), f_ou, larg_txt, d)[:2]:
+            ty += int_quoi
+        ty += 3 * ech
+        for l in lo:
             d.text((tx, ty), l, font=f_ou, fill=GRIS)
-            ty += 15 * ech
-        centres.append(((x0 + x1) // 2, y, y + haut_boite, x0, x1))
+            ty += int_ou
+        centres.append(((x0 + x1) // 2, y, y + h, x0, x1))
+        y += h + ecart
 
     for i in range(1, len(centres)):
         (cx0, ya0, yb0, xa0, xb0) = centres[i - 1]
@@ -201,50 +226,59 @@ def _dessiner_couloirs(titre, acteurs, etapes, legende=True):
             else:
                 p0 = (xa0, (ya0 + yb0) // 2)
                 p1 = (xb1, (ya1 + yb1) // 2)
-            xm = (p0[0] + p1[0]) // 2
+            xm = (p0[0] + p1[0]) // 2 + ((i % 3) - 1) * 7 * ech
             d.line([p0, (xm, p0[1]), (xm, p1[1]), p1], fill=GRIS, width=3 * ech, joint="curve")
             _pointe(d, p1, "droite" if cx1 > cx0 else "gauche", ech)
 
     if legende:
-        y = H - 60 * ech
+        y = H - 46 * ech
         x = marge
         for nom, fond in LEGENDE:
-            d.rounded_rectangle([x, y, x + 26 * ech, y + 18 * ech], radius=4 * ech, fill=fond, outline=TEAL, width=ech)
-            d.text((x + 34 * ech, y + 1 * ech), nom, font=f_leg, fill=GRIS)
-            x += 34 * ech + d.textlength(nom, font=f_leg) + 40 * ech
+            d.rounded_rectangle([x, y, x + 30 * ech, y + 20 * ech], radius=4 * ech, fill=fond, outline=TEAL, width=ech)
+            d.text((x + 38 * ech, y - 1 * ech), nom, font=f_leg, fill=GRIS)
+            x += 38 * ech + d.textlength(nom, font=f_leg) + 34 * ech
     return im, ech
 
 
 def _dessiner_couches(titre, couches):
     from PIL import Image, ImageDraw
     ech = 2
-    L = 1800 * ech
-    marge = 30 * ech
-    pas = 96 * ech
-    haut_titre = 70 * ech if titre else 16 * ech
-    H = haut_titre + pas * len(couches) + 30 * ech
+    L = LARGEUR * ech
+    marge = 20 * ech
+    haut_titre = 62 * ech if titre else 14 * ech
+    ecart = 30 * ech
+    f_titre = _police("bold", 26 * ech)
+    f_lib = _police("bold", 23 * ech)
+    f_det = _police("regular", 18 * ech)
+    x0, x1 = marge + 60 * ech, L - marge - 60 * ech
+    sonde = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    boites = []
+    for c in couches:
+        lq, lo = _hauteur_texte(sonde, c, f_lib, f_det, x1 - x0 - 32 * ech, max_quoi=2, max_ou=3)
+        h = 10 * ech + len(lq) * 28 * ech + (len(lo) * 22 * ech + 4 * ech if lo else 0) + 10 * ech
+        boites.append((lq, lo, h))
+    H = haut_titre + sum(b[2] + ecart for b in boites) - ecart + 20 * ech
     im = Image.new("RGB", (L, H), BLANC)
     d = ImageDraw.Draw(im)
-    f_titre = _police("bold", 22 * ech)
-    f_lib = _police("bold", 17 * ech)
-    f_det = _police("regular", 14 * ech)
     if titre:
-        d.text((marge, 22 * ech), titre, font=f_titre, fill=TEAL)
+        d.text((marge, 18 * ech), titre, font=f_titre, fill=TEAL)
     y = haut_titre
-    for i, c in enumerate(couches):
-        x0, x1 = marge + 120 * ech, L - marge - 120 * ech
-        d.rounded_rectangle([x0, y, x1, y + 72 * ech], radius=8 * ech,
+    for i, (c, (lq, lo, h)) in enumerate(zip(couches, boites)):
+        d.rounded_rectangle([x0, y, x1, y + h], radius=8 * ech,
                             fill=FONDS.get(c.get("nature", "lecture"), BLANC), outline=TEAL, width=2 * ech)
-        d.text((x0 + 16 * ech, y + 8 * ech), c.get("quoi", ""), font=f_lib, fill=TEAL)
-        ty = y + 32 * ech
-        for l in _couper(c.get("ou", ""), f_det, x1 - x0 - 32 * ech, d)[:2]:
+        ty = y + 9 * ech
+        for l in lq:
+            d.text((x0 + 16 * ech, ty), l, font=f_lib, fill=TEAL)
+            ty += 28 * ech
+        ty += 3 * ech
+        for l in lo:
             d.text((x0 + 16 * ech, ty), l, font=f_det, fill=GRIS)
-            ty += 17 * ech
+            ty += 22 * ech
         if i < len(couches) - 1:
             cx = (x0 + x1) // 2
-            d.line([(cx, y + 72 * ech), (cx, y + pas)], fill=GRIS, width=3 * ech)
-            _pointe(d, (cx, y + pas), "bas", ech)
-        y += pas
+            d.line([(cx, y + h), (cx, y + h + ecart)], fill=GRIS, width=3 * ech)
+            _pointe(d, (cx, y + h + ecart), "bas", ech)
+        y += h + ecart
     return im, ech
 
 
@@ -304,6 +338,10 @@ def _inserer(document_id: str, fichier_id: str, largeur_px: int, hauteur_px: int
     try:
         document = _docs().documents().get(documentId=document_id).execute()
         index = _index_apres(document, apres_texte)
+        # Un schema plus haut que la page utile est reduit en largeur,
+        # jamais coupe : 600 points de haut laissent la place a l'en-tete
+        # et au pied de page du gabarit.
+        largeur_points = min(largeur_points, HAUTEUR_MAX_POINTS * largeur_px / hauteur_px)
         hauteur_points = largeur_points * hauteur_px / largeur_px
         uri = "https://drive.google.com/uc?export=view&id=" + fichier_id
         requetes = [
