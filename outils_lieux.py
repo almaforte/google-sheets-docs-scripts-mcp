@@ -97,7 +97,7 @@ VIOLET = "#efebf7"
 BLANC = "#ffffff"
 ROUGE = "#ff0000"
 GRIS = "#666666"
-ORANGE = "#f9cb9c"
+ORANGE = "#fce5cd"
 ROUGE_DOUX = "#cc0000"
 
 LIBELLE_ETAGE = "Étage"
@@ -1218,7 +1218,7 @@ def _ecrire_grille(onglet: str, grille, sujet: str = ""):
     _vider(onglet, sujet=sujet)
     if sortie:
         _ecrire(onglet, "A1:" + _lettre(largeur - 1) + str(len(sortie)), sortie, sujet=sujet)
-    habillage = _fusions_entetes(sid, sortie) + _largeurs(sid, sortie)
+    habillage = _fusions_entetes(sid, sortie)
     if habillage:
         _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": habillage}).execute()
     return len(sortie), largeur
@@ -1383,6 +1383,7 @@ def lieux_migrer_ancienne_grille(appliquer: bool = False, source: str = "Proposi
     # 5. vues
     vue = _generer_vue(ONGLET_VUE, jour_meme, sujet=sujet)
     planification = _generer_planification(sujet=sujet)
+    _appliquer_largeurs(sujet=sujet)
 
     # 6. onglets obsoletes
     presents = _onglets(sujet=sujet)
@@ -1828,6 +1829,7 @@ def lieux_reprendre_geometrie(sujet: str = ""):
         _reinitialiser_onglet(titre, sujet=sujet)
     vue = _generer_vue(ONGLET_VUE, _aujourdhui(), sujet=sujet)
     planification = _generer_planification(sujet=sujet)
+    _appliquer_largeurs(sujet=sujet)
     _journaliser([[_maintenant(), ONGLET_GRILLE, "Nouvelle géométrie", "Référentiel - Bureaux",
                    str(len(valeurs)), str(reposees), "Terminé",
                    "cellules relues " + str(len(valeurs)) + ", reposées " + str(reposees)]], sujet=sujet)
@@ -1910,7 +1912,7 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
         _requetes_charte_bureaux(sid, normalise, couleurs)
         + _fusions_entetes(sid, normalise)
         + _fusions_demi_journees(sid, normalise)
-        + _largeurs(sid, normalise)}).execute()
+        + _largeurs(sid, _mesures_grille(normalise))}).execute()
 
     _journaliser([[_maintenant(), "Publication", "Copie vers Almaval - Patients", ONGLET_PATIENTS, "",
                    str(len(normalise)), "Terminé", "vue du " + _aujourdhui()]], sujet=sujet)
@@ -2554,47 +2556,105 @@ def _fusions_entetes(identifiant: int, grille):
                 requetes.append(fusion(r, bloc["colonne_jour"], bloc["colonne_demi"] + 1))
         if r_etage < 0 or r_etage >= len(grille):
             continue
-        ligne = grille[r_etage]
-        colonnes = [c for c, n in bloc["bureaux"] if _normaliser(n) != "MENAGE"]
-        debut, groupes = None, []
-        for c in colonnes:
-            if str(_cellule(ligne, c)).strip():
-                if debut is not None:
-                    groupes.append((debut, c - 1))
-                debut = c
-        if debut is not None and colonnes:
-            groupes.append((debut, colonnes[-1]))
-        for a, b in groupes:
-            if b > a:
+        for a, b in _segments_etage(grille, bloc):
+            if b > a and a != bloc["colonne_jour"]:
                 requetes.append(fusion(r_etage, a, b + 1))
     return requetes
 
 
-def _largeurs(identifiant: int, grille):
-    """Largeur de chaque colonne, ajustee au contenu le plus long.
+def _mesures_grille(grille, longueurs=None):
+    """Longueur du contenu le plus long de chaque colonne d'une grille.
 
-    Les etiquettes des lignes Étage et Numéro du bureau sont fusionnees
-    sur deux colonnes : elles ne comptent donc pas dans la mesure, sans
-    quoi la colonne des jours s'elargirait pour rien.
+    Trois cellules ne comptent pas : les etiquettes Étage et Numéro du
+    bureau, fusionnees sur deux colonnes, et le nom du site, qui se
+    renvoie a la ligne dans son en-tete. Sans cela la colonne des jours
+    et celle des demi-journees s'elargiraient pour rien.
     """
+    longueurs = dict(longueurs or {})
     ignorees = set()
     for bloc in _blocs(grille):
-        for r in (bloc["ligne_entete"] - 1, bloc["ligne_entete"] + 1):
+        r_entete = bloc["ligne_entete"]
+        for r in (r_entete - 1, r_entete + 1):
             ignorees.add((r, bloc["colonne_jour"]))
             ignorees.add((r, bloc["colonne_demi"]))
-    requetes = []
-    for c in range(max((len(l) for l in grille), default=0)):
-        longueur = 0
-        for r, ligne in enumerate(grille):
-            if r == 0 or (r, c) in ignorees:
+        ignorees.add((r_entete, bloc["colonne_demi"]))
+    for r, ligne in enumerate(grille):
+        if r == 0:
+            continue
+        for c in range(len(ligne)):
+            if (r, c) in ignorees:
                 continue
-            longueur = max(longueur, len(str(_cellule(ligne, c))))
-        taille = 18 if longueur == 0 else int(min(190, max(38, 12 + 4.6 * longueur)))
+            longueurs[c] = max(longueurs.get(c, 0), len(str(_cellule(ligne, c))))
+    return longueurs
+
+
+def _mesures(sujet: str = ""):
+    """Longueurs partagees par les grilles d'occupation.
+
+    Les quatre grilles ont la meme geometrie : elles doivent donc porter
+    les memes largeurs, sans quoi elles ne se superposent plus. La mesure
+    se fait sur les trois onglets du classeur, une fois qu'ils sont tous
+    ecrits, et jamais sur une grille encore vide comme l'est la
+    Planification avant que ses formules n'y soient posees.
+    """
+    longueurs = {}
+    for titre in (ONGLET_GRILLE, ONGLET_VUE, ONGLET_PLANIFICATION):
+        try:
+            longueurs = _mesures_grille(_lire(titre, sujet=sujet), longueurs)
+        except Exception:  # noqa: BLE001
+            continue
+    return longueurs
+
+
+def _largeurs(identifiant: int, longueurs):
+    """Requetes de largeur de colonne, a partir des longueurs mesurees."""
+    requetes = []
+    for c in sorted(longueurs):
+        taille = 20 if longueurs[c] == 0 else int(min(150, max(42, 12 + 4.7 * longueurs[c])))
         requetes.append({"updateDimensionProperties": {
             "range": {"sheetId": identifiant, "dimension": "COLUMNS",
                       "startIndex": c, "endIndex": c + 1},
             "properties": {"pixelSize": taille}, "fields": "pixelSize"}})
     return requetes
+
+
+def _appliquer_largeurs(sujet: str = ""):
+    """Pose les memes largeurs sur les trois grilles du classeur."""
+    longueurs = _mesures(sujet=sujet)
+    proprietes = _onglets(sujet=sujet)
+    requetes = []
+    for titre in (ONGLET_GRILLE, ONGLET_VUE, ONGLET_PLANIFICATION):
+        if titre in proprietes:
+            requetes.extend(_largeurs(proprietes[titre]["sheetId"], longueurs))
+    if requetes:
+        _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
+    return len(requetes)
+
+
+def _segments_etage(grille, bloc):
+    """Decoupe la ligne des etages : l'etiquette, puis un etage a la fois.
+
+    Chaque segment recoit son propre filet, de sorte que l'on voie ou un
+    etage finit et ou le suivant commence.
+    """
+    r_etage = bloc["ligne_entete"] - 1
+    if r_etage < 0 or r_etage >= len(grille):
+        return []
+    ligne = grille[r_etage]
+    segments = [(bloc["colonne_jour"], bloc["colonne_demi"])]
+    colonnes = [c for c, n in bloc["bureaux"] if _normaliser(n) != "MENAGE"]
+    debut = None
+    for c in colonnes:
+        if str(_cellule(ligne, c)).strip():
+            if debut is not None:
+                segments.append((debut, c - 1))
+            debut = c
+    if debut is not None and colonnes:
+        segments.append((debut, colonnes[-1]))
+    for c, nom in bloc["bureaux"]:
+        if _normaliser(nom) == "MENAGE":
+            segments.append((c, c))
+    return segments
 
 
 def _fusions_demi_journees(identifiant: int, grille):
@@ -2628,10 +2688,11 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
     Plus d'alternance de lignes. Chaque journee est encadree d'un filet
     gris moyen #666666, matin et apres-midi ensemble sans trait entre eux,
     et un filet separe chaque bureau. L'etage se lit sur un bandeau
-    orange au-dessus de l'en-tete doree. Chaque collaborateur porte son
-    pastel, pose par mise en forme conditionnelle et jamais par une
-    couleur de cellule ; ce qui n'est pas un nom de personne garde la
-    couleur de son type, et ce que le moteur ne reconnait pas reste blanc.
+    orange au-dessus de l'en-tete doree, chaque etage dans son propre
+    cadre. Chaque collaborateur porte son pastel, pose par mise en forme
+    conditionnelle et jamais par une couleur de cellule ; ce qui n'est
+    pas un nom de personne garde la couleur de son type, et ce que le
+    moteur ne reconnait pas reste blanc.
     """
     texte = {"fontFamily": POLICE, "fontSize": TAILLE, "foregroundColor": _rvb(TEAL)}
     masque = ("userEnteredFormat.textFormat.fontFamily,"
@@ -2668,14 +2729,28 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
         c0 = bloc["colonne_jour"]
         c1 = max(c for c, _ in bloc["bureaux"]) + 1
         if bloc["ligne_entete"] > 0:
+            r_etage = bloc["ligne_entete"] - 1
             requetes.append({"repeatCell": {
-                "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"] - 1,
-                          "endRowIndex": bloc["ligne_entete"],
+                "range": {"sheetId": identifiant, "startRowIndex": r_etage,
+                          "endRowIndex": r_etage + 1,
                           "startColumnIndex": c0, "endColumnIndex": c1},
                 "cell": {"userEnteredFormat": {"backgroundColor": _rvb(ORANGE),
                                                "textFormat": dict(texte, bold=True)}},
                 "fields": ("userEnteredFormat.backgroundColor,"
                            "userEnteredFormat.textFormat.bold," + masque)}})
+            for a, b in _segments_etage(grille, bloc):
+                requetes.append({"updateBorders": {
+                    "range": {"sheetId": identifiant, "startRowIndex": r_etage,
+                              "endRowIndex": r_etage + 1,
+                              "startColumnIndex": a, "endColumnIndex": b + 1},
+                    "top": filet, "bottom": filet, "left": filet, "right": filet,
+                    "innerVertical": aucun, "innerHorizontal": aucun}})
+            requetes.append({"updateBorders": {
+                "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"],
+                          "endRowIndex": bloc["ligne_entete"] + 1,
+                          "startColumnIndex": c0, "endColumnIndex": c1},
+                "top": filet, "bottom": filet, "left": filet, "right": filet,
+                "innerVertical": filet, "innerHorizontal": aucun}})
         requetes.append({"repeatCell": {
             "range": {"sheetId": identifiant, "startRowIndex": bloc["ligne_entete"],
                       "endRowIndex": bloc["ligne_entete"] + 1,
@@ -2960,6 +3035,7 @@ def lieux_poser_la_charte(sujet: str = ""):
         spreadsheetId=ID_LIEUX, body={"requests": requetes}
     ).execute()
 
+    _appliquer_largeurs(sujet=sujet)
     _journaliser([[_maintenant(), "Charte", "Pose", "Classeur des lieux", "", str(len(requetes)), "Terminé",
                    "onglets traités : " + ", ".join(traites)]], sujet=sujet)
     return {"onglets_traites": traites, "requetes": len(requetes),
@@ -3048,4 +3124,6 @@ def lieux_cycle(sujet: str = ""):
     attributions = lieux_construire_attributions(sujet=sujet)
     vue = lieux_vue_actuelle(sujet=sujet)
     planification = lieux_planification(sujet=sujet)
-    return {"attributions": attributions, "vue_actuelle": vue, "planification": planification}
+    colonnes = _appliquer_largeurs(sujet=sujet)
+    return {"attributions": attributions, "vue_actuelle": vue, "planification": planification,
+            "colonnes_ajustees": colonnes}
