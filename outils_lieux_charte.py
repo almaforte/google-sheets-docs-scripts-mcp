@@ -14,7 +14,6 @@ import colorsys
 
 from main import mcp, tolerant
 from outils_lieux_socle import (
-    BANDES_CALCULEES,
     BLANC,
     COLONNE_DATE,
     COULEURS_TYPE,
@@ -24,7 +23,6 @@ from outils_lieux_socle import (
     EDITEURS,
     FILET_LEGER,
     GRIS,
-    GRIS_CLAIR,
     HAUTEUR_ENTETE,
     HAUTEUR_LIGNE,
     ID_LIEUX,
@@ -48,6 +46,7 @@ from outils_lieux_socle import (
     TEAL,
     VIOLET,
     _ajuster_taille,
+    _bande_calculee,
     _blocs,
     _cellule,
     _colonne,
@@ -158,30 +157,10 @@ def _couleurs_personnes(sujet: str = ""):
     return couleurs
 
 
-def _bande_calculee(bloc) -> bool:
-    """Vrai pour une bande que les vues calculent (HOME OFFICE) : une
-    seule colonne de contenu, etiree sur toute la largeur de la grille."""
-    return _normaliser(bloc["site"]) in [_normaliser(s) for s in BANDES_CALCULEES]
-
-
-def _derniere_colonne(bloc, grille) -> int:
-    """Derniere colonne (incluse) d'un bloc : celle du dernier bureau,
-    ou le bord droit de la grille pour une bande calculee."""
-    if _bande_calculee(bloc):
-        return max((len(l) for l in grille), default=0) - 1
-    return max(c for c, _ in bloc["bureaux"])
-
-
 def _plages_occupant(identifiant: int, grille):
-    """Plages des cellules d'occupant d'une grille large, bloc par bloc.
-
-    La bande HOME OFFICE n'en fait pas partie : sa cellule porte
-    plusieurs noms, aucune couleur de personne ne lui convient.
-    """
+    """Plages des cellules d'occupant d'une grille large, bloc par bloc."""
     plages = []
     for bloc in _blocs(grille):
-        if _bande_calculee(bloc):
-            continue
         colonnes = [c for c, _ in bloc["bureaux"]]
         if colonnes:
             plages.append({
@@ -201,8 +180,7 @@ def _fusions_entetes(identifiant: int, grille):
     colonnes du bloc, chaque etage se lit d'un seul tenant au-dessus des
     bureaux qu'il couvre, et le nom du jour est fondu sur les lignes de
     sa journee pour se centrer face a Matin et Après-midi (Alberto,
-    14.09.2026). Dans la bande HOME OFFICE, la colonne de contenu est
-    etiree sur toute la largeur, une fois par demi-journee.
+    14.09.2026).
     """
     def fusion(r0, r1, c0, c1):
         return {"mergeCells": {"mergeType": "MERGE_ALL", "range": {
@@ -219,26 +197,6 @@ def _fusions_entetes(identifiant: int, grille):
         for r0, r1, _, _ in _journees(bloc):
             if r1 > r0:
                 requetes.append(fusion(r0, r1 + 1, bloc["colonne_jour"], bloc["colonne_jour"] + 1))
-        if _bande_calculee(bloc):
-            # une cellule par demi-journee sur toute la largeur, ou une
-            # seule pour la journee quand matin et apres-midi se valent
-            c0 = bloc["colonne_demi"] + 1
-            c1 = _derniere_colonne(bloc, grille) + 1
-            if c1 > c0 + 1:
-                for r in (r_etage, bloc["ligne_entete"], r_numero):
-                    if r >= 0:
-                        requetes.append(fusion(r, r + 1, c0, c1))
-                fondues = set()
-                for r, r_bas in _paires_journee(bloc):
-                    haut = str(_cellule(grille[r], c0)).strip()
-                    bas = str(_cellule(grille[r_bas], c0)).strip()
-                    if r_bas == r + 1 and haut and haut == bas:
-                        requetes.append(fusion(r, r + 2, c0, c1))
-                        fondues.update((r, r_bas))
-                for r, _, _ in bloc["lignes"]:
-                    if r not in fondues:
-                        requetes.append(fusion(r, r + 1, c0, c1))
-            continue
         if r_etage < 0 or r_etage >= len(grille):
             continue
         for a, b in _segments_etage(grille, bloc):
@@ -259,13 +217,6 @@ def _mesures_grille(grille, longueurs=None):
     ignorees = set()
     for bloc in _blocs(grille):
         r_entete = bloc["ligne_entete"]
-        if _bande_calculee(bloc):
-            # ses cellules s'etirent sur toute la largeur : elles ne
-            # mesurent aucune colonne
-            for r in range(r_entete - 1, bloc["fin"]):
-                for c in range(len(_cellule(grille, r) or [])):
-                    ignorees.add((r, c))
-            continue
         for r in (r_entete - 1, r_entete + 1):
             ignorees.add((r, bloc["colonne_jour"]))
             ignorees.add((r, bloc["colonne_demi"]))
@@ -292,8 +243,10 @@ def _mesures_grille(grille, longueurs=None):
 
 def _longueur_capitales(mot):
     """Longueur equivalente d'un mot ecrit en capitales grasses, plus
-    larges que les minuscules d'un nom : un tiers de plus."""
-    return int(len(mot) * 1.3 + 0.999)
+    larges que les minuscules d'un nom : la moitie de plus. Le nom du
+    site se renvoie a la ligne, mais aucun de ses mots ne doit etre coupe
+    (« MICHEL-CHAUVET » l'etait, 14.09.2026)."""
+    return int(len(mot) * 1.5 + 0.999)
 
 
 def _largeur_pixels(longueur):
@@ -469,8 +422,6 @@ def _fusions_demi_journees(identifiant: int, grille):
     """
     requetes = []
     for bloc in _blocs(grille):
-        if _bande_calculee(bloc):
-            continue  # ses fusions sont posees par _fusions_entetes
         for colonne, _ in bloc["bureaux"]:
             for r, r_bas in _paires_journee(bloc):
                 if r_bas != r + 1 or r + 1 >= len(grille):
@@ -492,7 +443,8 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
     Plus d'alternance de lignes. Chaque bloc de lieu est un seul cadre :
     filet gris moyen #666666 d'epaisseur moyenne autour du bloc entier,
     de la ligne des etages au samedi apres-midi. A l'interieur, tout est
-    en filet fin gris clair #999999 : entre les bureaux, entre les
+    en filet fin du meme gris (un gris plus clair se rendait en pointille
+    a certains zooms) : entre les bureaux, entre les
     journees, rien entre matin et apres-midi, rien entre la colonne des
     jours et celle des demi-journees. L'en-tete se lit d'une piece :
     bandeau orange des etages, filet fin, noms des bureaux en dore,
@@ -511,7 +463,7 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
               "userEnteredFormat.textFormat.fontSize,"
               "userEnteredFormat.textFormat.foregroundColor")
     filet = {"style": "SOLID_MEDIUM", "color": _rvb(GRIS)}
-    fin = {"style": "SOLID", "color": _rvb(GRIS_CLAIR)}
+    fin = {"style": "SOLID", "color": _rvb(GRIS)}
     aucun = {"style": "NONE"}
     requetes = []
     if base:
@@ -554,7 +506,7 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
 
     for bloc in _blocs(grille):
         c0 = bloc["colonne_jour"]
-        c1 = _derniere_colonne(bloc, grille) + 1
+        c1 = max(c for c, _ in bloc["bureaux"]) + 1
         r_entete = bloc["ligne_entete"]
         r_etage = r_entete - 1
         r_numero = r_entete + 1
@@ -564,12 +516,8 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
         # 1. page blanche : aucun filet dans le bloc
         requetes.append(bords(r_haut, r_fin, c0, c1, top=aucun, bottom=aucun, left=aucun, right=aucun,
                               innerHorizontal=aucun, innerVertical=aucun))
-        # 2. filets fins verticaux, de la colonne des demi-journees au dernier
-        #    bureau ; dans une bande calculee, un seul, avant la cellule etiree
-        if _bande_calculee(bloc):
-            requetes.append(bords(r_haut, r_fin, c0 + 1, c0 + 2, right=fin))
-        else:
-            requetes.append(bords(r_haut, r_fin, c0 + 1, c1, innerVertical=fin))
+        # 2. filets fins verticaux, de la colonne des demi-journees au dernier bureau
+        requetes.append(bords(r_haut, r_fin, c0 + 1, c1, innerVertical=fin))
 
         # 3. l'en-tete : etages en orange, noms en dore, numeros en dore pale
         if r_etage >= 0:
@@ -635,10 +583,6 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
         #    derniere journee (le jour fondu, une journee entiere), sans
         #    quoi il disparait sous elles.
         requetes.append(bords(r_haut, r_fin, c0, c1, top=filet, bottom=filet, left=filet, right=filet))
-        if _bande_calculee(bloc):
-            # la cellule etiree a sa maitresse en troisieme colonne : c'est
-            # elle qui porte le bord droit du cadre
-            requetes.append(bords(r_haut, r_fin, c0 + 2, c0 + 3, right=filet))
         if journees:
             r0, r1, _, _ = journees[-1]
             requetes.append(bords(r0, r0 + 1, c0, c0 + 1, bottom=filet))
@@ -806,8 +750,8 @@ def lieux_poser_la_charte(sujet: str = ""):
         grille = _lire(ONGLET_GRILLE, sujet=sujet)
         for bloc in _blocs(grille):
             colonnes_bureaux = [c for c, _ in bloc["bureaux"]]
-            if not colonnes_bureaux:
-                continue
+            if not colonnes_bureaux or _bande_calculee(bloc):
+                continue  # la bande HOME OFFICE ne se saisit pas
             for r_haut, r_bas in _paires_journee(bloc):
                 plages_occupant.append({
                     "sheetId": proprietes[ONGLET_GRILLE]["sheetId"],
