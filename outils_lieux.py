@@ -50,6 +50,7 @@ from outils_lieux_socle import (
     _agenda,
     _ajuster_taille,
     _aujourdhui,
+    _bande_teletravail,
     _blocs,
     _cellule,
     _colonne,
@@ -75,6 +76,7 @@ from outils_lieux_socle import (
     _sans_annexes,
     _squelette,
     _table_referentiel,
+    _teletravail_au,
     _vider,
 )
 from outils_lieux_charte import (
@@ -86,6 +88,7 @@ from outils_lieux_charte import (
     _fusions_lues,
     _largeurs,
     _mesures,
+    _rejouer_fusions,
     _requetes_charte_bureaux,
     _requetes_hauteurs,
     lieux_poser_la_charte,
@@ -673,6 +676,8 @@ def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
         sortie = [[titre]]
     else:
         sortie[0][0] = titre
+        # la bande HOME OFFICE, calculee depuis le registre RH, ferme la vue
+        sortie.extend(_bande_teletravail(largeur, _teletravail_au(date_iso, sujet=sujet)))
     _ecrire_grille(onglet, sortie, sujet=sujet)
     fusions = _fusions_demi_journees(_onglets(sujet=sujet)[onglet]["sheetId"], sortie)
     if fusions:
@@ -759,6 +764,10 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
                          + str(bloc["premiere_ligne"] + len(lignes_bloc)), lignes_bloc))
 
     sortie[0] = [""] * max(len(sortie[0]), COLONNE_DATE + 1)
+    # la bande HOME OFFICE est en valeurs, calculee a la date choisie au
+    # moment de la generation : le registre RH est un autre classeur, hors
+    # de portee d'une formule sans autorisation manuelle
+    sortie.extend(_bande_teletravail(largeur, _teletravail_au(date_choisie, sujet=sujet)))
     _ecrire_grille(ONGLET_PLANIFICATION, sortie, sujet=sujet)
     _ecrire(ONGLET_PLANIFICATION, "A1", [['="Planification au "&TEXTE($D$1;"dd.mm.yyyy")']],
             sujet=sujet, mode="USER_ENTERED")
@@ -901,10 +910,12 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
     ).execute()
     largeur = max(len(l) for l in vue)
     normalise = [list(l) + [""] * (largeur - len(l)) for l in vue]
-    # une journee tenue par la meme personne est fusionnee dans la vue :
-    # la lecture ne rend que le matin, on complete l'apres-midi avant de
-    # recopier, sinon la fusion ne se repose jamais chez Patients
-    _completer_fusions(normalise, _fusions_lues(ID_LIEUX, ONGLET_VUE, sujet=sujet))
+    # Les fusions de la vue (en-tetes, jours fondus, journees entieres,
+    # bande HOME OFFICE) sont reprises telles quelles : la lecture d'une
+    # feuille ne rend que la cellule maitresse d'une fusion, un recalcul
+    # depuis les valeurs recopiees perdrait donc les journees entieres.
+    fusions = _fusions_lues(ID_LIEUX, ONGLET_VUE, sujet=sujet)
+    _completer_fusions(normalise, fusions)
     _feuilles(sujet).values().update(
         spreadsheetId=ID_PATIENTS,
         range="'" + ONGLET_PATIENTS + "'!A1",
@@ -914,8 +925,7 @@ def lieux_publier_vers_patients(confirmer: bool = False, sujet: str = ""):
     couleurs = _couleurs_personnes(sujet=sujet)
     _feuilles(sujet).batchUpdate(spreadsheetId=ID_PATIENTS, body={"requests":
         _requetes_charte_bureaux(sid, normalise, couleurs)
-        + _fusions_entetes(sid, normalise)
-        + _fusions_demi_journees(sid, normalise)
+        + _rejouer_fusions(sid, fusions)
         + _largeurs(sid, _mesures(sujet=sujet))
         + _requetes_hauteurs(sid, normalise)}).execute()
 
@@ -1051,11 +1061,12 @@ def _rythme_par_bureau(sujet: str = ""):
         "Date de début", "Date de fin", "Statut", "Remarque",
     ]}
     jour_meme = _aujourdhui()
+    avec_agenda = _adresses_ressources(sujet=sujet)
     par_bureau = {}
     for ligne in registre[1:]:
         identifiant = _cellule(ligne, i["Identifiant du bureau"])
-        if not identifiant:
-            continue
+        if not identifiant or identifiant not in avec_agenda:
+            continue  # un poste administratif n'a pas d'agenda de salle
         if _cellule(ligne, i["Statut"]) not in ("Active", "Confirmée"):
             continue
         if _presence_administrative(_cellule(ligne, i["Remarque"])):
