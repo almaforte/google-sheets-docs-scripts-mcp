@@ -185,7 +185,6 @@ TYPE_POSTE_ADMIN = "Poste administratif"
 # travaille en home office quand, selon notre indexation des donnees).
 SITE_TELETRAVAIL = "HOME OFFICE"
 VALEUR_TELETRAVAIL = "Télétravail"
-COLONNE_TELETRAVAIL = "Collaborateurs en télétravail"
 ORIGINE_TELETRAVAIL = "Selon le registre RH"
 BANDES_CALCULEES = (SITE_TELETRAVAIL,)
 
@@ -633,20 +632,31 @@ def _date_serie(valeur) -> str:
     return ""
 
 
-def _bande_teletravail(largeur: int, presents) -> list:
-    """Bande HOME OFFICE d'une vue, meme geometrie qu'un bloc de lieu :
-    une ligne d'etage (qui dit d'ou vient la donnee), l'en-tete, une
-    ligne de numeros vide, puis les douze demi-journees. Les noms de la
-    demi-journee sont joints dans la premiere colonne de bureau, que
-    la mise en forme fusionne sur toute la largeur."""
-    largeur = max(largeur, 3)
+def _bande_teletravail(presents) -> list:
+    """Bande HOME OFFICE, meme geometrie qu'un bloc de lieu : une ligne
+    d'etage (qui dit d'ou vient la donnee), l'en-tete avec des places
+    numerotees 1, 2, 3..., une ligne de numeros vide, puis les douze
+    demi-journees. Chaque personne en teletravail occupe une place, la
+    meme le matin et l'apres-midi d'une journee, de sorte que la journee
+    entiere se fusionne comme dans les autres blocs (Alberto, 14.09.2026 :
+    une table de bureaux remplie personne par personne, jamais des noms
+    joints dans une cellule)."""
+    par_jour = {}
+    for jour in JOURS:
+        noms = set()
+        for demi in DEMIS:
+            noms.update(presents.get((jour, demi), []))
+        par_jour[jour] = sorted(noms)
+    places = max([len(n) for n in par_jour.values()] + [1])
+    largeur = 2 + places
     etages = [""] * largeur
     etages[0] = LIBELLE_ETAGE
     etages[2] = ORIGINE_TELETRAVAIL
     entete = [""] * largeur
     entete[0] = "Jour"
     entete[1] = SITE_TELETRAVAIL
-    entete[2] = COLONNE_TELETRAVAIL
+    for k in range(places):
+        entete[2 + k] = "Place " + str(k + 1)
     numeros = [""] * largeur
     numeros[0] = LIBELLE_NUMERO
     lignes = [[], etages, entete, numeros]
@@ -655,9 +665,28 @@ def _bande_teletravail(largeur: int, presents) -> list:
             ligne = [""] * largeur
             ligne[0] = jour if demi == DEMIS[0] else ""
             ligne[1] = demi
-            ligne[2] = ", ".join(presents.get((jour, demi), []))
+            presents_demi = set(presents.get((jour, demi), []))
+            for k, nom in enumerate(par_jour[jour]):
+                if nom in presents_demi:
+                    ligne[2 + k] = nom
             lignes.append(ligne)
     return lignes
+
+
+def _bande_calculee(bloc) -> bool:
+    """Vrai pour une bande que le moteur calcule (HOME OFFICE) : elle se
+    lit comme un bloc, mais ne se saisit pas et ne passe pas au registre."""
+    return _normaliser(bloc["site"]) in [_normaliser(s) for s in BANDES_CALCULEES]
+
+
+def _sans_bandes_calculees(grille):
+    """La grille sans ses bandes calculees, ligne vide de separation
+    comprise : ce qui reste est la geometrie saisie."""
+    a_retirer = set()
+    for bloc in _blocs(grille):
+        if _bande_calculee(bloc):
+            a_retirer.update(range(max(bloc["ligne_entete"] - 2, 0), bloc["fin"]))
+    return [ligne for r, ligne in enumerate(grille) if r not in a_retirer]
 
 
 def _blocs(grille):
@@ -722,6 +751,8 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
 
     occupations, anomalies = [], []
     for bloc in _blocs(grille):
+        if _bande_calculee(bloc):
+            continue  # HOME OFFICE se lit dans le registre RH, jamais ici
         cle_site = _normaliser(bloc["site"])
         bureaux_du_site = par_batiment.get(cle_site)
         if bureaux_du_site is None:
