@@ -449,10 +449,13 @@ def lieux_poser_la_charte_transitoire(sujet: str = ""):
 def _ponctuels_semaine(date_iso: str, sujet: str = ""):
     """Ce que les agendas des salles portent de ponctuel cette semaine.
 
-    Du lundi au samedi de la semaine de la date, tous les evenements des
-    agendas de salles qui ne sont pas des blocs standard poses par le
-    moteur. Un evenement du matin va dans la ligne Matin, de l'apres-midi
-    dans la ligne Après-midi, une journee entiere dans les deux. Rend
+    Du lundi au samedi de la semaine de la date, les evenements ECRITS
+    DANS l'agenda du lieu (organisateur = la salle), hors blocs standard
+    poses par le moteur. Un rendez-vous pose depuis l'agenda d'un
+    therapeute avec la salle en invitee n'est jamais relu : il porte
+    souvent le nom d'un patient, et la vue se publie a tous. Un
+    evenement du matin va dans la ligne Matin, de l'apres-midi dans la
+    ligne Après-midi, une journee entiere dans les deux. Rend
     ({cle de cellule: [libelles]}, echecs, evenements lus).
     """
     try:
@@ -495,6 +498,9 @@ def _ponctuels_semaine(date_iso: str, sujet: str = ""):
                 continue
             if ((e.get("extendedProperties") or {}).get("private") or {}).get(MARQUEUR):
                 continue  # bloc standard pose par le moteur
+            organisateur = e.get("organizer") or {}
+            if organisateur.get("email", "") != fiche["adresse"] and not organisateur.get("self"):
+                continue  # invitation venue d'un agenda personnel, jamais relue
             lus += 1
             titre = str(e.get("summary") or "(sans titre)").strip()
             debut, fin = e.get("start") or {}, e.get("end") or {}
