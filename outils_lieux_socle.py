@@ -110,6 +110,11 @@ ROUGE = "#ff0000"
 GRIS = "#666666"
 ORANGE = "#fce5cd"
 ROUGE_DOUX = "#cc0000"
+# Filets des grilles d'occupation (Alberto, 14.09.2026) : cadre du bloc
+# en gris moyen, filets interieurs fins en gris plus clair ; numeros de
+# bureau sur un dore pale, accroches aux noms.
+GRIS_CLAIR = "#999999"
+DORE_PALE = "#fbe9b8"
 
 LIBELLE_ETAGE = "Étage"
 LIBELLE_NUMERO = "Numéro du bureau"
@@ -163,7 +168,26 @@ ORDRE_BATIMENTS = [
     ["Vevey"],
     ["Genève - Michel-Chauvet"],
     ["Lausanne - Lisière"],
+    ["Administration"],
 ]
+
+# L'administration est un batiment du referentiel comme les autres
+# (demande d'Alberto du 14.09.2026, la charte des admins de l'ancienne
+# grille) : ses « bureaux » sont des postes, son « etage » le
+# departement, sans colonne Menage ni agenda de salle. Le site RH de ses
+# postes est Crissier.
+BATIMENT_ADMINISTRATION = "Administration"
+TYPE_POSTE_ADMIN = "Poste administratif"
+
+# La bande HOME OFFICE des vues n'est pas saisie dans Propositions : elle
+# se calcule depuis Registre - Engagements, ou chaque demi-journee porte
+# le lieu de travail, « Télétravail » compris (Alberto, 14.09.2026 : qui
+# travaille en home office quand, selon notre indexation des donnees).
+SITE_TELETRAVAIL = "HOME OFFICE"
+VALEUR_TELETRAVAIL = "Télétravail"
+COLONNE_TELETRAVAIL = "Collaborateurs en télétravail"
+ORIGINE_TELETRAVAIL = "Selon le registre RH"
+BANDES_CALCULEES = (SITE_TELETRAVAIL,)
 
 # Noms de sites de l'ancienne grille vers le nom du batiment du referentiel
 SITES_ANCIENNE_GRILLE = {
@@ -497,7 +521,9 @@ def _squelette(par_identifiant, annexes: bool = True):
             if not fiches:
                 continue
             colonnes_blocs.append((depart, nom, fiches))
-            largeur = 2 + len(fiches) + 1
+            # pas de colonne Menage pour un batiment fait de postes
+            avec_menage = any(f["type"] != TYPE_POSTE_ADMIN for f in fiches)
+            largeur = 2 + len(fiches) + (1 if avec_menage else 0)
             depart += largeur + 1
             largeur_bande = depart - 1
         if not colonnes_blocs:
@@ -519,7 +545,8 @@ def _squelette(par_identifiant, annexes: bool = True):
                 if lisible and lisible != precedent:
                     etages[c] = lisible
                 precedent = lisible or precedent
-            entete[depart + 2 + len(fiches)] = "Ménage"
+            if any(f["type"] != TYPE_POSTE_ADMIN for f in fiches):
+                entete[depart + 2 + len(fiches)] = "Ménage"
         if len(grille) > 1:
             grille.append([])
         grille.append(etages)
@@ -541,6 +568,96 @@ def _sans_annexes(grille):
     for bloc in _blocs(grille):
         a_retirer.update(bloc["annexes"].values())
     return [ligne for r, ligne in enumerate(grille) if r not in a_retirer]
+
+
+def _teletravail_au(date_iso: str, sujet: str = ""):
+    """Qui est en teletravail a chaque demi-journee, a une date donnee.
+
+    Lu dans Registre - Engagements : engagements En cours ou À venir,
+    vivants a la date (date de debut au plus tard, date de fin au plus
+    tot), dont la colonne « Jour demi-journee » vaut Télétravail. Rend
+    {(jour, demi): [noms tries]}.
+    """
+    effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
+    if not effectif:
+        return {}
+    tetes = effectif[0]
+    i_nom = _colonne(tetes, "Nom prénom")
+    try:
+        i_etat = _colonne(tetes, "État de l'engagement")
+    except RuntimeError:
+        i_etat = None
+    try:
+        i_debut = _colonne(tetes, "Date de début")
+        i_fin = _colonne(tetes, "Date de fin")
+    except RuntimeError:
+        i_debut = i_fin = None
+    creneaux = []
+    for jour in JOURS:
+        for demi in DEMIS:
+            try:
+                creneaux.append((jour, demi, _colonne(tetes, jour + " " + demi.lower())))
+            except RuntimeError:
+                continue
+    presents = {}
+    for ligne in effectif[1:]:
+        nom = str(_cellule(ligne, i_nom)).strip()
+        if not nom:
+            continue
+        if i_etat is not None and _cellule(ligne, i_etat) not in ETATS_ENGAGEMENT_VIVANTS:
+            continue
+        if i_debut is not None:
+            debut = _date_serie(_cellule(ligne, i_debut))
+            fin = _date_serie(_cellule(ligne, i_fin))
+            if debut and debut > date_iso:
+                continue
+            if fin and fin < date_iso:
+                continue
+        for jour, demi, c in creneaux:
+            if _normaliser(_cellule(ligne, c)) == _normaliser(VALEUR_TELETRAVAIL):
+                presents.setdefault((jour, demi), set()).add(nom)
+    return {cle: sorted(noms) for cle, noms in presents.items()}
+
+
+def _date_serie(valeur) -> str:
+    """Date ISO d'une cellule lue en valeur formatee ou en numero de serie."""
+    iso = _date(valeur)
+    if iso:
+        return iso
+    try:
+        n = float(str(valeur).strip())
+    except (TypeError, ValueError):
+        return ""
+    if 20000 < n < 80000:
+        return (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(n))).isoformat()
+    return ""
+
+
+def _bande_teletravail(largeur: int, presents) -> list:
+    """Bande HOME OFFICE d'une vue, meme geometrie qu'un bloc de lieu :
+    une ligne d'etage (qui dit d'ou vient la donnee), l'en-tete, une
+    ligne de numeros vide, puis les douze demi-journees. Les noms de la
+    demi-journee sont joints dans la premiere colonne de bureau, que
+    la mise en forme fusionne sur toute la largeur."""
+    largeur = max(largeur, 3)
+    etages = [""] * largeur
+    etages[0] = LIBELLE_ETAGE
+    etages[2] = ORIGINE_TELETRAVAIL
+    entete = [""] * largeur
+    entete[0] = "Jour"
+    entete[1] = SITE_TELETRAVAIL
+    entete[2] = COLONNE_TELETRAVAIL
+    numeros = [""] * largeur
+    numeros[0] = LIBELLE_NUMERO
+    lignes = [[], etages, entete, numeros]
+    for jour in JOURS:
+        for demi in DEMIS:
+            ligne = [""] * largeur
+            ligne[0] = jour if demi == DEMIS[0] else ""
+            ligne[1] = demi
+            ligne[2] = ", ".join(presents.get((jour, demi), []))
+            lignes.append(ligne)
+    return lignes
 
 
 def _blocs(grille):
