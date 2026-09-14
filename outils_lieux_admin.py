@@ -561,3 +561,36 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
         "lignes": len(grille),
         "colonnes": meta["largeur"],
     }
+
+
+# ------------------------------------------ passage par le pont de lieux_cycle
+#
+# Le client MCP de claude.ai garde en cache la liste des outils d'une
+# conversation : un outil ajoute au serveur n'y apparait qu'a la
+# conversation suivante. lieux_cycle route « action:nom clef=valeur » vers
+# le pont d'outils_lieux ; ce module y greffe « vueadmin », avec
+# date=aaaa-mm-jj en option, sans reecrire outils_lieux. Si la greffe
+# echoue, l'outil lieux_vue_admin reste servi tel quel.
+
+try:
+    import shlex as _shlex
+
+    import outils_lieux as _outils_lieux
+
+    _pont_d_origine = _outils_lieux._pont
+
+    def _pont(texte: str):
+        brut = str(texte or "").strip()
+        try:
+            morceaux = _shlex.split(brut)
+        except ValueError:
+            morceaux = brut.split()
+        if morceaux and morceaux[0].lower() in ("vueadmin", "vue_admin"):
+            params = dict(m.split("=", 1) for m in morceaux[1:] if "=" in m)
+            return lieux_vue_admin(date=params.get("date", ""))
+        return _pont_d_origine(brut)
+
+    _outils_lieux._pont = _pont
+    print("[lieux admin] action vueadmin greffée au pont de lieux_cycle", flush=True)
+except Exception as _exc:  # noqa: BLE001
+    print("[lieux admin] pont non greffé : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
