@@ -13,6 +13,10 @@ Le parcours officiel, arrete avec Alberto le 13.09.2026
   Propositions  : la grille de SAISIE. Une cellule par salle et
                   demi-journee, un nom choisi dans une liste bloquante,
                   jamais de date dans la cellule. C'est l'etat VOULU.
+                  Sous chaque apres-midi, depuis le 14.09.2026, une
+                  ligne Date (la date de debut que le gestionnaire
+                  propose pour ce qui est ecrit dans la journee) et une
+                  ligne Notes (qui nourrit la remarque du registre).
   Attributions  : le REGISTRE, cumulatif, une ligne par personne, salle
                   et demi-journee, avec une date de debut et une date de
                   fin. Ces deux dates sont les seules colonnes qu'une
@@ -127,6 +131,13 @@ TYPES_REQUIS = ["Ménage", "Direction", "Colloque", "Formation", "Kétamine",
 
 JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
 DEMIS = ["Matin", "Après-midi"]
+# Deux lignes de saisie sous chaque apres-midi de Propositions (demande
+# d'Alberto du 14.09.2026) : la date que le gestionnaire propose pour ce
+# qui est ecrit dans la journee, et une note. Les vues n'en ont pas.
+LIGNE_DATE = "Date"
+LIGNE_NOTES = "Notes"
+ANNEXES = (LIGNE_DATE, LIGNE_NOTES)
+FILET_LEGER = "#cccccc"
 HEURES_DEFAUT = {"Matin": ("07:00", "13:00"), "Après-midi": ("13:00", "20:00")}
 JOUR_RRULE = {"LUNDI": "MO", "MARDI": "TU", "MERCREDI": "WE", "JEUDI": "TH",
               "VENDREDI": "FR", "SAMEDI": "SA"}
@@ -443,8 +454,12 @@ def _etage_lisible(etage: str) -> str:
     return e
 
 
-def _squelette(par_identifiant):
+def _squelette(par_identifiant, annexes: bool = True):
     """Construit la grille vide, en bandes de sites, depuis le referentiel.
+
+    annexes : sous chaque apres-midi, une ligne Date et une ligne Notes
+    (Propositions). Les vues, generees depuis Propositions, les retirent
+    par _sans_annexes.
 
     La premiere ligne ne porte que le titre de l'onglet. Chaque bande :
     une ligne d'etages, une ligne « Jour | SITE | bureaux | Ménage », une
@@ -499,13 +514,21 @@ def _squelette(par_identifiant):
         grille.append(entete)
         grille.append(numeros)
         for jour in JOURS:
-            for demi in DEMIS:
+            for demi in DEMIS + (list(ANNEXES) if annexes else []):
                 ligne = [""] * largeur_bande
                 for depart, nom, fiches in colonnes_blocs:
                     ligne[depart] = jour if demi == DEMIS[0] else ""
                     ligne[depart + 1] = demi
                 grille.append(ligne)
     return grille
+
+
+def _sans_annexes(grille):
+    """La meme grille sans les lignes Date et Notes : geometrie des vues."""
+    a_retirer = set()
+    for bloc in _blocs(grille):
+        a_retirer.update(bloc["annexes"].values())
+    return [ligne for r, ligne in enumerate(grille) if r not in a_retirer]
 
 
 def _blocs(grille):
@@ -529,15 +552,36 @@ def _blocs(grille):
             while k < len(ligne) and _cellule(ligne, k):
                 bureaux.append((k, _cellule(ligne, k)))
                 k += 1
-            if bureaux:
-                reperes.append({
-                    "ligne_entete": r,
-                    "colonne_jour": c,
-                    "colonne_demi": c + 1,
-                    "site": site,
-                    "bureaux": bureaux,
-                    "premiere_ligne": r + 2,
-                })
+            if not bureaux:
+                continue
+            # Les lignes de demi-journees, puis les eventuelles lignes Date
+            # et Notes de chaque journee, jusqu'a la premiere cellule vide
+            # de la colonne des demi-journees.
+            lignes, annexes = [], {}
+            rr = r + 2
+            jour_courant = ""
+            while rr < len(grille):
+                demi = str(_cellule(grille[rr], c + 1)).strip()
+                jour = str(_cellule(grille[rr], c)).strip() or jour_courant
+                if demi in DEMIS and jour:
+                    lignes.append((rr, jour, demi))
+                    jour_courant = jour
+                elif demi in ANNEXES and jour_courant:
+                    annexes[(jour_courant, demi)] = rr
+                else:
+                    break
+                rr += 1
+            reperes.append({
+                "ligne_entete": r,
+                "colonne_jour": c,
+                "colonne_demi": c + 1,
+                "site": site,
+                "bureaux": bureaux,
+                "premiere_ligne": r + 2,
+                "fin": rr,
+                "lignes": lignes,
+                "annexes": annexes,
+            })
     return reperes
 
 
@@ -558,22 +602,17 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
         # d'une ligne Ménage soit la meme ici et dans la migration.
         nom_du_site = next(iter(bureaux_du_site.values()))["nom_batiment"]
 
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(grille):
-                break
+        for r, jour, demi in bloc["lignes"]:
             ligne = grille[r]
-            jour = _cellule(ligne, bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(ligne, bloc["colonne_demi"])
-            if not jour or not demi:
-                continue
+            r_date = bloc["annexes"].get((jour, LIGNE_DATE))
+            r_note = bloc["annexes"].get((jour, LIGNE_NOTES))
 
             for colonne, nom_bureau in bloc["bureaux"]:
                 occupant = str(_cellule(ligne, colonne)).strip()
                 if not occupant:
                     continue
+                date_proposee = _date(_cellule(grille[r_date], colonne)) if r_date is not None else ""
+                note = str(_cellule(grille[r_note], colonne)).strip() if r_note is not None else ""
 
                 fiche = bureaux_du_site.get(_normaliser_bureau(nom_bureau))
                 cle = _normaliser(occupant)
@@ -599,6 +638,8 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
                     "nature": nature,
                     "ligne": r,
                     "colonne": colonne,
+                    "date_proposee": date_proposee,
+                    "note": note,
                 })
 
                 if fiche is None and _normaliser(nom_bureau) != "MENAGE":
@@ -1238,16 +1279,7 @@ def _poser_occupants(grille, occupations, cle_valeur):
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
     poses, debordements = 0, []
     for bloc in _blocs(grille):
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(sortie):
-                break
-            jour = _cellule(grille[r], bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(grille[r], bloc["colonne_demi"])
-            if not jour or not demi:
-                continue
+        for r, jour, demi in bloc["lignes"]:
             for colonne, nom_bureau in bloc["bureaux"]:
                 cle = "|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau), jour, demi])
                 candidats = par_cle.get(cle, [])
@@ -1431,9 +1463,11 @@ def lieux_construire_attributions(sujet: str = ""):
     corriger a la main) et le statut « Terminée ». Une attribution qui
     apparait recoit une date de debut (le jour meme, a corriger a la
     main). Les dates deja ecrites par une personne ne sont JAMAIS
-    reprises par le moteur. Une ligne dont la remarque porte « Registre
-    seul » vit dans le registre sans passer par la grille et n'est jamais
-    close par ce passage.
+    reprises par le moteur, sauf quand la ligne Date de Propositions en
+    donne une : celle-la fait foi pour le matin et l'apres-midi de la
+    journee, et la ligne Notes devient la remarque. Une ligne dont la
+    remarque porte « Registre seul » vit dans le registre sans passer par
+    la grille et n'est jamais close par ce passage.
     """
     occupations, anomalies = _lire_la_grille(sujet=sujet)
     jour_meme = _aujourdhui()
@@ -1478,6 +1512,17 @@ def lieux_construire_attributions(sujet: str = ""):
         else:
             debut, fin = jour_meme, ""
             cree += 1
+        # La ligne Date de Propositions, quand elle est remplie, dit la
+        # date de debut de ce qui est ecrit dans la journee ; la ligne
+        # Notes nourrit la remarque. Toutes deux valent pour le matin et
+        # l'apres-midi de la journee.
+        if o.get("date_proposee"):
+            if o["date_proposee"] != debut:
+                debut = o["date_proposee"]
+                if fin and fin < debut:
+                    fin = ""
+        if o.get("note"):
+            remarque = o["note"]
         if o["nature"] == "À vérifier":
             statut = "Proposée"
             if "Nom inconnu" not in remarque:
@@ -1638,23 +1683,15 @@ def _actives_au(date_iso: str, sujet: str = ""):
 
 
 def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
-    """Grille generee a une date, meme geometrie que Propositions."""
-    grille = _lire(ONGLET_GRILLE, sujet=sujet)
+    """Grille generee a une date, meme geometrie que Propositions, sans
+    les lignes Date et Notes."""
+    grille = _sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet))
     actives = _actives_au(date_iso, sujet=sujet)
     largeur = max((len(l) for l in grille), default=0)
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
     poses = 0
     for bloc in _blocs(grille):
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(sortie):
-                break
-            jour = _cellule(grille[r], bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(grille[r], bloc["colonne_demi"])
-            if not jour or not demi:
-                continue
+        for r, jour, demi in bloc["lignes"]:
             for colonne, nom_bureau in bloc["bureaux"]:
                 cle = "|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau), jour, demi])
                 occupants = actives.get(cle, [])
@@ -1722,7 +1759,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
     Les demi-journees n'y sont pas fusionnees : une fusion est figee, et
     elle mentirait des que la date de D1 change.
     """
-    grille = _lire(ONGLET_GRILLE, sujet=sujet)
+    grille = _sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet))
     largeur = max((len(l) for l in grille), default=0)
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
     if not sortie:
@@ -1738,14 +1775,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
         colonnes = [c for c, _ in bloc["bureaux"]]
         c0, c1 = min(colonnes), max(colonnes)
         lignes_bloc = []
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(sortie):
-                break
-            jour = _cellule(grille[r], bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(grille[r], bloc["colonne_demi"])
+        for r, jour, demi in bloc["lignes"]:
             ligne = []
             for c in range(c0, c1 + 1):
                 if jour and demi and c in colonnes:
@@ -1787,16 +1817,13 @@ def lieux_reprendre_geometrie(sujet: str = ""):
     ancienne = _lire(ONGLET_GRILLE, sujet=sujet)
     valeurs = {}
     for bloc in _blocs(ancienne):
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(ancienne):
-                break
-            jour = _cellule(ancienne[r], bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(ancienne[r], bloc["colonne_demi"])
-            if not jour or not demi:
-                continue
+        for r, jour, demi in bloc["lignes"]:
+            for colonne, nom_bureau in bloc["bureaux"]:
+                valeur = str(_cellule(ancienne[r], colonne)).strip()
+                if valeur:
+                    valeurs["|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau),
+                                      jour, demi])] = valeur
+        for (jour, demi), r in bloc["annexes"].items():
             for colonne, nom_bureau in bloc["bureaux"]:
                 valeur = str(_cellule(ancienne[r], colonne)).strip()
                 if valeur:
@@ -1809,16 +1836,15 @@ def lieux_reprendre_geometrie(sujet: str = ""):
     sortie = [list(l) + [""] * (largeur - len(l)) for l in squelette]
     reposees, placees = 0, set()
     for bloc in _blocs(squelette):
-        jour_courant = ""
-        for decalage in range(12):
-            r = bloc["premiere_ligne"] + decalage
-            if r >= len(sortie):
-                break
-            jour = _cellule(squelette[r], bloc["colonne_jour"]) or jour_courant
-            jour_courant = jour
-            demi = _cellule(squelette[r], bloc["colonne_demi"])
-            if not jour or not demi:
-                continue
+        for r, jour, demi in bloc["lignes"]:
+            for colonne, nom_bureau in bloc["bureaux"]:
+                cle = "|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau), jour, demi])
+                valeur = valeurs.get(cle, "")
+                sortie[r][colonne] = valeur
+                if valeur:
+                    reposees += 1
+                    placees.add(cle)
+        for (jour, demi), r in bloc["annexes"].items():
             for colonne, nom_bureau in bloc["bureaux"]:
                 cle = "|".join([_normaliser(bloc["site"]), _normaliser_bureau(nom_bureau), jour, demi])
                 valeur = valeurs.get(cle, "")
@@ -2541,7 +2567,7 @@ def _plages_occupant(identifiant: int, grille):
             plages.append({
                 "sheetId": identifiant,
                 "startRowIndex": bloc["premiere_ligne"],
-                "endRowIndex": bloc["premiere_ligne"] + 12,
+                "endRowIndex": bloc["fin"],
                 "startColumnIndex": min(colonnes),
                 "endColumnIndex": max(colonnes) + 1,
             })
@@ -2593,6 +2619,11 @@ def _mesures_grille(grille, longueurs=None):
         # le nom du site compte par son mot le plus long : il se renvoie
         # a la ligne, mais aucun de ses mots ne doit etre coupe
         ignorees.add((r_entete, bloc["colonne_demi"]))
+        # les notes se renvoient a la ligne, elles n'elargissent rien
+        for (jour, demi), r in bloc["annexes"].items():
+            if demi == LIGNE_NOTES:
+                for c, _ in bloc["bureaux"]:
+                    ignorees.add((r, c))
         mots = str(_cellule(grille[r_entete], bloc["colonne_demi"])).split()
         c = bloc["colonne_demi"]
         longueurs[c] = max(longueurs.get(c, 0), max((_longueur_capitales(m) for m in mots), default=0))
@@ -2708,6 +2739,37 @@ def _segments_etage(grille, bloc):
     return segments
 
 
+def _paires_journee(bloc):
+    """(ligne du matin, ligne de l'apres-midi) pour chaque journee du bloc."""
+    par_jour = {}
+    for r, jour, demi in bloc["lignes"]:
+        par_jour.setdefault(jour, {})[demi] = r
+    paires = []
+    for jour in JOURS:
+        rangs = par_jour.get(jour, {})
+        if DEMIS[0] in rangs and DEMIS[1] in rangs:
+            paires.append((rangs[DEMIS[0]], rangs[DEMIS[1]]))
+    return paires
+
+
+def _journees(bloc):
+    """Pour chaque journee : (premiere ligne, derniere ligne incluse,
+    ligne Date ou None, ligne Notes ou None)."""
+    par_jour = {}
+    for r, jour, demi in bloc["lignes"]:
+        par_jour.setdefault(jour, []).append(r)
+    journees = []
+    for jour in JOURS:
+        rangs = list(par_jour.get(jour, []))
+        if not rangs:
+            continue
+        r_date = bloc["annexes"].get((jour, LIGNE_DATE))
+        r_note = bloc["annexes"].get((jour, LIGNE_NOTES))
+        derniere = max(rangs + [x for x in (r_date, r_note) if x is not None])
+        journees.append((min(rangs), derniere, r_date, r_note))
+    return journees
+
+
 def _fusions_demi_journees(identifiant: int, grille):
     """Fusionne matin et apres-midi quand la valeur est la meme.
 
@@ -2719,10 +2781,9 @@ def _fusions_demi_journees(identifiant: int, grille):
     requetes = []
     for bloc in _blocs(grille):
         for colonne, _ in bloc["bureaux"]:
-            for k in range(6):
-                r = bloc["premiere_ligne"] + 2 * k
-                if r + 1 >= len(grille):
-                    break
+            for r, r_bas in _paires_journee(bloc):
+                if r_bas != r + 1 or r + 1 >= len(grille):
+                    continue
                 haut = str(_cellule(grille[r], colonne)).strip()
                 bas = str(_cellule(grille[r + 1], colonne)).strip()
                 if haut and haut == bas:
@@ -2818,13 +2879,42 @@ def _requetes_charte_bureaux(identifiant: int, grille, couleurs, base: bool = Tr
                                            "textFormat": dict(texte, bold=True)}},
             "fields": ("userEnteredFormat.backgroundColor,"
                        "userEnteredFormat.textFormat.bold," + masque)}})
-        for k in range(6):
-            r = bloc["premiere_ligne"] + 2 * k
+        for r0, r1, r_date, r_note in _journees(bloc):
             requetes.append({"updateBorders": {
-                "range": {"sheetId": identifiant, "startRowIndex": r, "endRowIndex": r + 2,
+                "range": {"sheetId": identifiant, "startRowIndex": r0, "endRowIndex": r1 + 1,
                           "startColumnIndex": c0, "endColumnIndex": c1},
                 "top": filet, "bottom": filet, "left": filet, "right": filet,
                 "innerVertical": filet, "innerHorizontal": aucun}})
+            # Les lignes Date et Notes de Propositions : fond jaune de
+            # saisie et un filet leger au-dessus, pour ne pas les
+            # confondre avec les demi-journees.
+            premiere_annexe = min(x for x in (r_date, r_note) if x is not None) if (r_date is not None or r_note is not None) else None
+            if premiere_annexe is not None:
+                requetes.append({"repeatCell": {
+                    "range": {"sheetId": identifiant, "startRowIndex": premiere_annexe,
+                              "endRowIndex": r1 + 1,
+                              "startColumnIndex": c0 + 2, "endColumnIndex": c1},
+                    "cell": {"userEnteredFormat": {"backgroundColor": _rvb(JAUNE)}},
+                    "fields": "userEnteredFormat.backgroundColor"}})
+                requetes.append({"updateBorders": {
+                    "range": {"sheetId": identifiant, "startRowIndex": premiere_annexe,
+                              "endRowIndex": premiere_annexe + 1,
+                              "startColumnIndex": c0, "endColumnIndex": c1},
+                    "top": {"style": "SOLID", "color": _rvb(FILET_LEGER)}}})
+            if r_date is not None:
+                requetes.append({"repeatCell": {
+                    "range": {"sheetId": identifiant, "startRowIndex": r_date,
+                              "endRowIndex": r_date + 1,
+                              "startColumnIndex": c0 + 2, "endColumnIndex": c1},
+                    "cell": {"userEnteredFormat": {"numberFormat": {"type": "DATE", "pattern": "dd.mm.yyyy"}}},
+                    "fields": "userEnteredFormat.numberFormat"}})
+            if r_note is not None:
+                requetes.append({"repeatCell": {
+                    "range": {"sheetId": identifiant, "startRowIndex": r_note,
+                              "endRowIndex": r_note + 1,
+                              "startColumnIndex": c0 + 2, "endColumnIndex": c1},
+                    "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": _rvb(GRIS), "italic": True}}},
+                    "fields": "userEnteredFormat.textFormat.foregroundColor,userEnteredFormat.textFormat.italic"}})
 
     plages = _plages_occupant(identifiant, grille)
     if plages:
@@ -2986,13 +3076,25 @@ def lieux_poser_la_charte(sujet: str = ""):
             colonnes_bureaux = [c for c, _ in bloc["bureaux"]]
             if not colonnes_bureaux:
                 continue
-            plages_occupant.append({
-                "sheetId": proprietes[ONGLET_GRILLE]["sheetId"],
-                "startRowIndex": bloc["premiere_ligne"],
-                "endRowIndex": bloc["premiere_ligne"] + 12,
-                "startColumnIndex": min(colonnes_bureaux),
-                "endColumnIndex": max(colonnes_bureaux) + 1,
-            })
+            for r_haut, r_bas in _paires_journee(bloc):
+                plages_occupant.append({
+                    "sheetId": proprietes[ONGLET_GRILLE]["sheetId"],
+                    "startRowIndex": r_haut,
+                    "endRowIndex": r_bas + 1,
+                    "startColumnIndex": min(colonnes_bureaux),
+                    "endColumnIndex": max(colonnes_bureaux) + 1,
+                })
+            for (jour, demi), r in bloc["annexes"].items():
+                if demi != LIGNE_DATE:
+                    continue
+                requetes.append({"setDataValidation": {
+                    "range": {"sheetId": proprietes[ONGLET_GRILLE]["sheetId"],
+                              "startRowIndex": r, "endRowIndex": r + 1,
+                              "startColumnIndex": min(colonnes_bureaux),
+                              "endColumnIndex": max(colonnes_bureaux) + 1},
+                    "rule": {"condition": {"type": "DATE_IS_VALID"}, "showCustomUi": False,
+                             "strict": True,
+                             "inputMessage": "Date de début proposée pour ce qui est écrit dans la journée, au format jj.mm.aaaa."}}})
     listes = _lire(ONGLET_LISTES, sujet=sujet)
     try:
         lettre_h = _lettre(_colonne(listes[0], "Valeurs acceptées en cellule"))
