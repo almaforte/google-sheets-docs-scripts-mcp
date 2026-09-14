@@ -640,14 +640,32 @@ def _bande_teletravail(presents) -> list:
     meme le matin et l'apres-midi d'une journee, de sorte que la journee
     entiere se fusionne comme dans les autres blocs (Alberto, 14.09.2026 :
     une table de bureaux remplie personne par personne, jamais des noms
-    joints dans une cellule)."""
-    par_jour = {}
+    joints dans une cellule).
+
+    Placement (Alberto, 14.09.2026) : chaque therapeute garde la meme
+    place toute la semaine, et deux therapeutes partagent une place
+    lorsque leurs demi-journees ne se recouvrent jamais (une personne
+    le matin, une autre l'apres-midi). Les personnes les plus presentes
+    sont placees d'abord, puis chacune prend la premiere place libre
+    sur toutes ses demi-journees ; a defaut, une nouvelle place."""
+    creneaux = {}
     for jour in JOURS:
-        noms = set()
         for demi in DEMIS:
-            noms.update(presents.get((jour, demi), []))
-        par_jour[jour] = sorted(noms)
-    places = max([len(n) for n in par_jour.values()] + [1])
+            for nom in presents.get((jour, demi), []):
+                creneaux.setdefault(nom, set()).add((jour, demi))
+    ordre = sorted(creneaux, key=lambda n: (-len(creneaux[n]), n))
+    colonnes = []
+    place_de = {}
+    for nom in ordre:
+        for k, occupe in enumerate(colonnes):
+            if not (occupe & creneaux[nom]):
+                occupe.update(creneaux[nom])
+                place_de[nom] = k
+                break
+        else:
+            colonnes.append(set(creneaux[nom]))
+            place_de[nom] = len(colonnes) - 1
+    places = max(len(colonnes), 1)
     largeur = 2 + places
     etages = [""] * largeur
     etages[0] = LIBELLE_ETAGE
@@ -665,10 +683,8 @@ def _bande_teletravail(presents) -> list:
             ligne = [""] * largeur
             ligne[0] = jour if demi == DEMIS[0] else ""
             ligne[1] = demi
-            presents_demi = set(presents.get((jour, demi), []))
-            for k, nom in enumerate(par_jour[jour]):
-                if nom in presents_demi:
-                    ligne[2 + k] = nom
+            for nom in presents.get((jour, demi), []):
+                ligne[2 + place_de[nom]] = nom
             lignes.append(ligne)
     return lignes
 
