@@ -73,7 +73,9 @@ from outils_lieux_socle import (
     _normaliser_bureau,
     _onglets,
     _ressources,
+    _bande_calculee,
     _sans_annexes,
+    _sans_bandes_calculees,
     _squelette,
     _table_referentiel,
     _teletravail_au,
@@ -658,7 +660,7 @@ def _actives_au(date_iso: str, sujet: str = ""):
 def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
     """Grille generee a une date, meme geometrie que Propositions, sans
     les lignes Date et Notes."""
-    grille = _sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet))
+    grille = _sans_bandes_calculees(_sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet)))
     actives = _actives_au(date_iso, sujet=sujet)
     largeur = max((len(l) for l in grille), default=0)
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
@@ -677,7 +679,7 @@ def _generer_vue(onglet: str, date_iso: str, sujet: str = ""):
     else:
         sortie[0][0] = titre
         # la bande HOME OFFICE, calculee depuis le registre RH, ferme la vue
-        sortie.extend(_bande_teletravail(largeur, _teletravail_au(date_iso, sujet=sujet)))
+        sortie.extend(_bande_teletravail(_teletravail_au(date_iso, sujet=sujet)))
     _ecrire_grille(onglet, sortie, sujet=sujet)
     fusions = _fusions_demi_journees(_onglets(sujet=sujet)[onglet]["sheetId"], sortie)
     if fusions:
@@ -734,7 +736,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
     Les demi-journees n'y sont pas fusionnees : une fusion est figee, et
     elle mentirait des que la date de D1 change.
     """
-    grille = _sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet))
+    grille = _sans_bandes_calculees(_sans_annexes(_lire(ONGLET_GRILLE, sujet=sujet)))
     largeur = max((len(l) for l in grille), default=0)
     sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
     if not sortie:
@@ -767,7 +769,7 @@ def _generer_planification(date_iso: str = "", sujet: str = ""):
     # la bande HOME OFFICE est en valeurs, calculee a la date choisie au
     # moment de la generation : le registre RH est un autre classeur, hors
     # de portee d'une formule sans autorisation manuelle
-    sortie.extend(_bande_teletravail(largeur, _teletravail_au(date_choisie, sujet=sujet)))
+    sortie.extend(_bande_teletravail(_teletravail_au(date_choisie, sujet=sujet)))
     _ecrire_grille(ONGLET_PLANIFICATION, sortie, sujet=sujet)
     _ecrire(ONGLET_PLANIFICATION, "A1", [['="Planification au "&TEXTE($D$1;"dd.mm.yyyy")']],
             sujet=sujet, mode="USER_ENTERED")
@@ -796,6 +798,8 @@ def lieux_reprendre_geometrie(sujet: str = ""):
     ancienne = _lire(ONGLET_GRILLE, sujet=sujet)
     valeurs = {}
     for bloc in _blocs(ancienne):
+        if _bande_calculee(bloc):
+            continue
         for r, jour, demi in bloc["lignes"]:
             for colonne, nom_bureau in bloc["bureaux"]:
                 valeur = str(_cellule(ancienne[r], colonne)).strip()
@@ -832,6 +836,9 @@ def lieux_reprendre_geometrie(sujet: str = ""):
                     reposees += 1
                     placees.add(cle)
 
+    # la bande HOME OFFICE est aussi dans Propositions, pour que les quatre
+    # grilles se lisent de la meme facon ; elle s'y rafraichit a chaque cycle
+    sortie.extend(_bande_teletravail(_teletravail_au(_aujourdhui(), sujet=sujet)))
     _reinitialiser_onglet(ONGLET_GRILLE, sujet=sujet)
     _ecrire_grille(ONGLET_GRILLE, sortie, sujet=sujet)
     for titre in (ONGLET_VUE, ONGLET_PLANIFICATION):
@@ -847,13 +854,39 @@ def lieux_reprendre_geometrie(sujet: str = ""):
             "vue_actuelle": vue, "planification": planification}
 
 
+def _rafraichir_bande_propositions(sujet: str = ""):
+    """Reecrit en place la bande HOME OFFICE de Propositions, au jour meme.
+
+    Meme nombre de lignes qu'avant : seules les valeurs changent, les
+    fusions de structure restent. Si le nombre de places change, la
+    ligne d'en-tete s'allonge ou se raccourcit d'elle-meme. Quand la
+    bande n'est pas encore la, c'est lieux_reprendre_geometrie qui la pose.
+    """
+    grille = _lire(ONGLET_GRILLE, sujet=sujet)
+    for bloc in _blocs(grille):
+        if not _bande_calculee(bloc):
+            continue
+        bande = _bande_teletravail(_teletravail_au(_aujourdhui(), sujet=sujet))[1:]
+        r0 = bloc["ligne_entete"] - 1
+        if r0 < 0 or bloc["fin"] - r0 != len(bande):
+            return 0
+        largeur = max(max(len(l) for l in bande), max((len(l) for l in grille), default=0))
+        sortie = [list(l) + [""] * (largeur - len(l)) for l in bande]
+        _ecrire(ONGLET_GRILLE, "A" + str(r0 + 1) + ":" + _lettre(largeur - 1) + str(r0 + len(sortie)),
+                sortie, sujet=sujet)
+        return len(sortie)
+    return 0
+
+
 @mcp.tool()
 @tolerant
 def lieux_vue_actuelle(date: str = "", sujet: str = ""):
     """Reconstruit la vue du jour, meme geometrie que Propositions.
 
-    date permet de regarder un autre jour ; par defaut aujourd'hui.
+    date permet de regarder un autre jour ; par defaut aujourd'hui. La
+    bande HOME OFFICE de Propositions est rafraichie au passage.
     """
+    _rafraichir_bande_propositions(sujet=sujet)
     return _generer_vue(ONGLET_VUE, _date(date) or _aujourdhui(), sujet=sujet)
 
 
