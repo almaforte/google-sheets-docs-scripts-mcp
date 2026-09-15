@@ -92,6 +92,8 @@ connaitre cette vue ; lieux_poser_la_charte ne la touche pas.
 
 from main import mcp, tolerant
 from outils_lieux_socle import (
+    BATIMENT_ADMINISTRATION,
+    BLANC,
     DEMIS,
     EDITEURS,
     ETATS_ENGAGEMENT_VIVANTS,
@@ -775,6 +777,26 @@ def _charte_admin(sid: int, grille, meta, couleurs):
                 "format": {"textFormat": {"italic": True, "foregroundColor": _rvb(GRIS)}}},
         }, "index": 0}})
 
+    # La ligne de titre n'est pas une ligne d'etage. Depuis que la bande
+    # a disparu, la charte des bureaux la prenait pour telle et y posait
+    # son bandeau et ses filets verticaux (Alberto, 15.09.2026 : « ligne 1
+    # pas de diviseurs verticaux des cellules, c'est moche »). Elle est
+    # donc remise a plat en dernier, apres tout le reste : fond blanc,
+    # aucune bordure, titre a gauche qui deborde sur les colonnes vides.
+    requetes.append({"repeatCell": {
+        "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                  "startColumnIndex": 0, "endColumnIndex": meta["largeur"]},
+        "cell": {"userEnteredFormat": {"backgroundColor": _rvb(BLANC)}},
+        "fields": "userEnteredFormat.backgroundColor"}})
+    requetes.append({"repeatCell": {
+        "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1,
+                  "startColumnIndex": 0, "endColumnIndex": 1},
+        "cell": {"userEnteredFormat": {"horizontalAlignment": "LEFT",
+                                       "wrapStrategy": "OVERFLOW_CELL"}},
+        "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.wrapStrategy"}})
+    requetes.append(bords(0, 1, 0, meta["largeur"], innerVertical=aucun,
+                          top=aucun, bottom=aucun, left=aucun, right=aucun))
+
     # onglet de consultation : protege, ecrit par le moteur
     requetes.append({"addProtectedRange": {"protectedRange": {
         "range": {"sheetId": sid},
@@ -932,3 +954,44 @@ try:
     print("[lieux admin] action vueadmin greffée au pont de lieux_cycle", flush=True)
 except Exception as _exc:  # noqa: BLE001
     print("[lieux admin] pont non greffé : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
+
+
+# ------------------------------ retrait du bloc des postes admin des grilles
+#
+# Alberto, 15.09.2026 au soir : « dans occupations bureaux in Patients tu
+# dois donc enlever les postes admins, ca me va bien l'onglet a part. Dans
+# planification aussi. Idem tout pour Propositions. » Les postes
+# administratifs ne paraissent donc plus dans les grilles d'occupation
+# (Propositions, Planification, Vue actuelle, et la copie publiee chez
+# Patients) : la Vue admin, qui dit par personne son cahier des charges et
+# sa presence, porte desormais seule cette information.
+#
+# Rien n'est detruit : le Referentiel - Bureaux garde ses postes, le
+# registre Attributions garde ses lignes, et vider BATIMENTS_MASQUES les
+# fait revenir au prochain passage de geometrie. Ce qui disparait, c'est
+# la SAISIE d'une occupation administrative dans Propositions : elle se
+# fait desormais dans le registre des attributions.
+#
+# La greffe enveloppe _squelette, qui construit la geometrie des grilles
+# depuis le referentiel. outils_lieux l'a importee par son nom : c'est
+# donc la reference de ce module-la qu'il faut remplacer, comme pour le
+# pont ci-dessus.
+
+BATIMENTS_MASQUES = (BATIMENT_ADMINISTRATION,)
+
+try:
+    import outils_lieux as _outils_lieux_geometrie
+
+    _squelette_d_origine = _outils_lieux_geometrie._squelette
+
+    def _squelette_sans_postes_admin(par_identifiant, annexes: bool = True):
+        masques = {_normaliser(n) for n in BATIMENTS_MASQUES}
+        retenus = {cle: fiche for cle, fiche in par_identifiant.items()
+                   if _normaliser(fiche.get("nom_batiment", "")) not in masques}
+        return _squelette_d_origine(retenus, annexes)
+
+    _outils_lieux_geometrie._squelette = _squelette_sans_postes_admin
+    print("[lieux admin] postes admin retirés des grilles d'occupation", flush=True)
+except Exception as _exc:  # noqa: BLE001
+    print("[lieux admin] retrait des postes admin non greffé : "
+          + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
