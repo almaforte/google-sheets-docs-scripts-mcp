@@ -9,27 +9,34 @@ present quel jour, et sa repartition d'EPT par cahier des charges
 est-elle juste. D'ou une vue a part, de meme facture que la Vue
 actuelle, ou la personne prend la place du bureau en tete de colonne.
 
-Tout se lit dans Registre - Engagements, le fichier definitif des
-collaborateurs : le cahier des charges dans les colonnes « EPT <service> »
-(Direction, Qualite, RH, Secretariat, Proximite, Formation, Partenariat,
-Logistique, Comptabilite, Operations, ADC, Service social, Finances,
-IT...), une ligne par service tenu, avec le departement du service lu
-dans Services - Responsables d'Almaval - Listes ; la presence dans les
-douze colonnes de demi-journees, qui portent le lieu. Toute personne
-dont l'engagement vivant porte un EPT administratif figure dans la vue,
-les therapeutes a part administrative compris.
+Deux registres du fichier definitif des collaborateurs se lisent.
+Registre - Engagements donne qui est a part administrative (colonne
+« EPT admin »), l'EPT porte par chaque service (colonnes « EPT
+<service> ») et la presence de chaque demi-journee (les douze colonnes
+qui portent le lieu). Registre - Postes admin, onglet de saisie
+d'Alberto depuis le 15.09.2026, donne la nomenclature du cahier des
+charges : par personne, une ligne par poste, Departement, Poste, Taux.
+C'est cette nomenclature que la vue ecrit ; les colonnes de services du
+registre ne servent plus qu'a defaut, pour une personne qui n'a pas
+encore de postes declares, et une ligne « Direction » ne se montre
+jamais : la part de direction est inherente aux roles des huit poles
+de la direction generale, elle n'est pas un poste a part. Le total des
+taux se confronte a l'EPT administratif de l'engagement : en rose s'il
+le depasse, et une ligne « À répartir » en rose pour la part qu'aucun
+poste ne porte.
 
 Chaque personne occupe trois colonnes. Au-dessus, la bande des
-departements, comme la bande des etages ailleurs. Sous son nom, son
-cahier des charges : Departement, Poste, Taux, une ligne par poste ;
-puis le total, en rose s'il ne fait pas l'EPT administratif de
-l'engagement, et une ligne « À répartir » en rose pour la part d'EPT
-administratif qu'aucun service ne porte encore. Dans la grille, le mot
-« Présent » sur chaque demi-journee tenue dans un lieu de la maison, aux
-couleurs de la personne, « Télétravail » en gris quand elle travaille de
-chez elle, chaque mot fondu sur la journee entiere comme un nom dans les
-autres vues. Tout est ecrit par le moteur, rien ne se saisit : l'onglet
-est protege.
+departements (Direction, Administration, Thérapies, lus dans Services -
+Responsables d'Almaval - Listes), comme la bande des etages ailleurs.
+Sous son nom, la ligne « Cahier des charges » sur sa propre couleur,
+puis les postes, separes par un filet horizontal tirete, sans filet
+vertical entre Departement, Poste et Taux ; puis le total. Dans la
+grille, le mot « Présent » sur chaque demi-journee tenue dans un lieu
+de la maison, aux couleurs de la personne, « Télétravail » en gris
+quand elle travaille de chez elle, chaque mot fondu sur la journee
+entiere comme un nom dans les autres vues. Tout est ecrit par le
+moteur, rien ne se saisit ici : l'onglet est protege, et la nomenclature
+se corrige dans Registre - Postes admin.
 
 Facon de poser la charte. Les grilles d'occupation n'ont qu'une ligne
 entre les noms et le premier matin, la ligne des numeros, et _blocs ne
@@ -95,6 +102,22 @@ COLONNES_PERSONNE = ("Département", "Poste", "Taux")
 LARGEURS_PERSONNE = (84, 92, 34)
 LARGEUR_JOUR = 80
 LARGEUR_DEMI = 60
+# La ligne « Cahier des charges » se distingue des postes qu'elle
+# coiffe : cyan pale de la gamme claire, la famille froide de la maison.
+COULEUR_CAHIER = "#d0e0e3"
+# Les taux se lisent a une decimale au moins, trois quand il le faut
+# (0,028 de formation, 0,293 de proximite).
+FORMAT_TAUX = "0.0##"
+# Entre deux postes d'une meme personne, un filet horizontal tirete.
+FILET_POSTES = "DASHED"
+
+# La nomenclature du cahier des charges, saisie par Alberto : une ligne
+# par poste, rattachee a l'engagement par sa cle, ou a defaut par le nom.
+ONGLET_POSTES = "Registre - Postes admin"
+COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Département", "Poste", "Taux")
+# Les services du registre qui ne font pas un poste a part : la part de
+# direction est inherente aux roles des poles de la direction generale.
+SERVICES_INTEGRES = ("Direction",)
 
 # Le classeur maitre des vocabulaires, et son onglet des services : un
 # service, son departement, son responsable.
@@ -162,11 +185,56 @@ def _cle_service(nom: str) -> str:
     return _normaliser(ALIAS_SERVICES.get(cle, nom))
 
 
+def _postes_declares(sujet: str = ""):
+    """La nomenclature saisie dans Registre - Postes admin : rend
+    ({cle d'engagement normalisee: [(departement, poste, taux)]},
+    {nom normalise: [(departement, poste, taux)]}), dans l'ordre des
+    lignes ; une ligne va sous sa cle quand elle en porte une, sous son
+    nom sinon. Sans l'onglet, la vue se fait avec les services du
+    registre."""
+    try:
+        lignes = _lire(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
+    except Exception:  # noqa: BLE001
+        return {}, {}
+    if not lignes:
+        return {}, {}
+    tetes = lignes[0]
+    try:
+        i_departement = _colonne(tetes, "Département")
+        i_poste = _colonne(tetes, "Poste")
+        i_taux = _colonne(tetes, "Taux")
+    except RuntimeError:
+        return {}, {}
+    try:
+        i_cle = _colonne(tetes, "Clé engagement")
+    except RuntimeError:
+        i_cle = None
+    try:
+        i_nom = _colonne(tetes, "Nom prénom")
+    except RuntimeError:
+        i_nom = None
+    par_cle, par_nom = {}, {}
+    for ligne in lignes[1:]:
+        departement = str(_cellule(ligne, i_departement)).strip()
+        poste = str(_cellule(ligne, i_poste)).strip()
+        taux = _nombre(_cellule(ligne, i_taux))
+        if not poste and not departement:
+            continue
+        entree = (departement, poste, taux if taux is not None else 0.0)
+        cle = _normaliser(_cellule(ligne, i_cle)) if i_cle is not None else ""
+        nom = _normaliser(_cellule(ligne, i_nom)) if i_nom is not None else ""
+        if cle:
+            par_cle.setdefault(cle, []).append(entree)
+        elif nom:
+            par_nom.setdefault(nom, []).append(entree)
+    return par_cle, par_nom
+
+
 def _engagements_admin(date_iso: str, sujet: str = ""):
     """Ce que Registre - Engagements dit de chaque personne a part
-    administrative, a une date : l'EPT administratif, le cahier des
-    charges (EPT par service), la profession et la presence de chaque
-    demi-journee (le lieu). Engagements vivants a la date ; En cours
+    administrative, a une date : la cle d'engagement, l'EPT
+    administratif, l'EPT par service, la profession et la presence de
+    chaque demi-journee (le lieu). Engagements vivants a la date ; En cours
     prime sur À venir ; deux engagements du meme etat s'additionnent.
     Rend {nom: fiche}."""
     effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
@@ -175,6 +243,10 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
     tetes = effectif[0]
     i_nom = _colonne(tetes, "Nom prénom")
     i_admin = _colonne(tetes, "EPT admin")
+    try:
+        i_cle = _colonne(tetes, "Clé engagement")
+    except RuntimeError:
+        i_cle = None
     try:
         i_profession = _colonne(tetes, "Profession")
     except RuntimeError:
@@ -225,9 +297,11 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
         if ept_admin <= 0 and not postes:
             continue
         fiche = par_etat.setdefault(_normaliser(nom), {}).setdefault(etat, {
-            "nom": nom, "ept_admin": 0.0, "postes": {}, "profession": "", "presences": {},
+            "nom": nom, "cle": "", "ept_admin": 0.0, "postes": {}, "profession": "", "presences": {},
         })
         fiche["ept_admin"] += ept_admin
+        if not fiche["cle"] and i_cle is not None:
+            fiche["cle"] = str(_cellule(ligne, i_cle)).strip()
         for service, valeur in postes.items():
             fiche["postes"][service] = fiche["postes"].get(service, 0.0) + valeur
         if not fiche["profession"] and i_profession is not None:
@@ -264,6 +338,11 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     poste, la ligne « À répartir » quand elle a lieu d'etre, le total,
     puis les douze demi-journees.
 
+    Le cahier des charges d'une personne est celui de Registre - Postes
+    admin, dans l'ordre de ses lignes, retrouve par la cle d'engagement
+    ou, a defaut, par le nom. Sans postes declares, les services du
+    registre en tiennent lieu, par EPT decroissant, sans la Direction.
+
     Chaque personne est rangee sous le service de sa profession quand la
     profession est un service (RH, Logistique, Secrétariat...), sinon
     sous son service le plus lourd (un psychologue a 0,1 de Formation va
@@ -273,6 +352,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     """
     ordre, departements = _services(sujet=sujet)
     fiches = _engagements_admin(date_iso, sujet=sujet)
+    declares_cle, declares_nom = _postes_declares(sujet=sujet)
+    integres = {_cle_service(s) for s in SERVICES_INTEGRES}
 
     def service_de(fiche):
         profession = _cle_service(fiche["profession"])
@@ -291,13 +372,20 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         return (rang_departement(departements.get(service, "")), ordre.get(service, 999), _normaliser(nom))
 
     personnes = sorted(fiches, key=rang)
-    cahiers, a_repartir = [], {}
+    cahiers, a_repartir, sans_cahier = [], {}, []
     for nom in personnes:
         fiche = fiches[nom]
-        lignes_postes = sorted(
-            ((-v, ordre.get(_cle_service(s), 999), s, v) for s, v in fiche["postes"].items()),
-        )
-        cahier = [(departements.get(_cle_service(s), ""), s, v) for _, _, s, v in lignes_postes]
+        declare = list(declares_cle.get(_normaliser(fiche["cle"]), [])) if fiche["cle"] else []
+        declare += declares_nom.get(_normaliser(nom), [])
+        if declare:
+            cahier = [(d, p, round(float(t or 0.0), 3)) for d, p, t in declare]
+        else:
+            sans_cahier.append(nom)
+            lignes_postes = sorted(
+                ((-v, ordre.get(_cle_service(s), 999), s, v) for s, v in fiche["postes"].items()
+                 if _cle_service(s) not in integres),
+            )
+            cahier = [(departements.get(_cle_service(s), ""), s, v) for _, _, s, v in lignes_postes]
         reste = round(fiche["ept_admin"] - sum(v for _, _, v in cahier), 3)
         if reste > 0.0005:
             cahier.append(("", A_REPARTIR, reste))
@@ -389,6 +477,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         "roses": roses,
         "ecarts": ecarts,
         "n_postes": n_postes,
+        "sans_cahier": sans_cahier,
         "sans_departement": sorted({s for c in cahiers for d, s, _ in c if not d and s != A_REPARTIR}),
     }
     return grille, meta
@@ -471,8 +560,16 @@ def _charte_admin(sid: int, grille, meta, couleurs):
 
     filet = {"style": "SOLID_MEDIUM", "color": _rvb(GRIS)}
     fin = {"style": "SOLID", "color": _rvb(GRIS)}
+    tirete = {"style": FILET_POSTES, "color": _rvb(GRIS)}
+    aucun = {"style": "NONE"}
     r_fin = meta["r_fin"]
     n = len(meta["personnes"])
+
+    def bords(r0, r1, c0, c1, **cotes):
+        requete = {"range": {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1,
+                             "startColumnIndex": c0, "endColumnIndex": c1}}
+        requete.update(cotes)
+        return {"updateBorders": requete}
 
     # les colonnes des jours restent sous les yeux quand la vue defile
     requetes.append({"updateSheetProperties": {
@@ -496,15 +593,24 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": c0, "endIndex": c1},
             "properties": {"pixelSize": pixels}, "fields": "pixelSize"}})
 
+    # la ligne « Cahier des charges » sur sa propre couleur, en gras
+    r_intitules = meta["r_intitules"]
+    requetes.append({"repeatCell": {
+        "range": {"sheetId": sid, "startRowIndex": r_intitules, "endRowIndex": r_intitules + 1,
+                  "startColumnIndex": 0, "endColumnIndex": meta["largeur"]},
+        "cell": {"userEnteredFormat": {"backgroundColor": _rvb(COULEUR_CAHIER),
+                                       "textFormat": {"bold": True}}},
+        "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold"}})
+
     if meta["r_attributs"]:
         r0, r1 = meta["r_attributs"][0], meta["r_attributs"][-1] + 1
-        # les taux en nombre a une decimale
+        # les taux en nombre, une a trois decimales
         for k in range(n):
             c = 2 + 3 * k + 2
             requetes.append({"repeatCell": {
                 "range": {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1,
                           "startColumnIndex": c, "endColumnIndex": c + 1},
-                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}}},
+                "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": FORMAT_TAUX}}},
                 "fields": "userEnteredFormat.numberFormat"}})
         # ce qui ne fait pas le compte se lit en rose : un total qui ne
         # fait pas l'EPT administratif, une part qu'aucun service ne porte
@@ -515,21 +621,23 @@ def _charte_admin(sid: int, grille, meta, couleurs):
                 "cell": {"userEnteredFormat": {"backgroundColor": _rvb(ROSE)}},
                 "fields": "userEnteredFormat.backgroundColor"}})
 
-    # un filet fin separe les postes de leur total
+    # aucun filet vertical entre Departement, Poste et Taux d'une meme
+    # personne : la charte des bureaux en pose un entre chaque colonne
+    for k in range(n):
+        c = 2 + 3 * k
+        requetes.append(bords(meta["r_departements"], r_fin, c, c + 3, innerVertical=aucun))
+
+    # un filet tirete entre deux postes, un filet fin avant le total
     if meta["r_attributs"]:
         r_total = meta["r_attributs"][-1]
-        requetes.append({"updateBorders": {
-            "range": {"sheetId": sid, "startRowIndex": r_total, "endRowIndex": r_total + 1,
-                      "startColumnIndex": 0, "endColumnIndex": meta["largeur"]},
-            "top": fin}})
+        for r in meta["r_attributs"][1:-1]:
+            requetes.append(bords(r, r + 1, 0, meta["largeur"], top=tirete))
+        requetes.append(bords(r_total, r_total + 1, 0, meta["largeur"], top=fin))
 
     # un filet moyen entre deux personnes, de la bande des departements au samedi
     for k in range(1, n):
         c = 2 + 3 * k
-        requetes.append({"updateBorders": {
-            "range": {"sheetId": sid, "startRowIndex": meta["r_departements"], "endRowIndex": r_fin,
-                      "startColumnIndex": c, "endColumnIndex": c + 1},
-            "left": filet}})
+        requetes.append(bords(meta["r_departements"], r_fin, c, c + 1, left=filet))
 
     # « Présent » aux couleurs de la personne, « Télétravail » en gris
     for k, nom in enumerate(meta["personnes"]):
@@ -592,12 +700,14 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
     """Reconstruit la vue des postes admin par personne, onglet Vue admin.
 
     Meme facture que la Vue actuelle, la personne en tete de colonne.
-    Tout vient de Registre - Engagements : sous le nom, le cahier des
-    charges (departement, poste, taux, une ligne par service porte par
-    l'engagement) et son total ; puis « Présent » ou « Télétravail » sur
-    chaque demi-journee travaillee, fondu sur la journee. Toute personne
-    a part administrative y figure. date permet de regarder un autre
-    jour ; par defaut aujourd'hui.
+    Sous le nom, le cahier des charges tel que Registre - Postes admin le
+    declare (departement, poste, taux, une ligne par poste) et son
+    total, confronte a l'EPT administratif de Registre - Engagements ;
+    puis « Présent » ou « Télétravail » sur chaque demi-journee
+    travaillee, fondu sur la journee. Toute personne a part
+    administrative y figure ; sans postes declares, ses services du
+    registre en tiennent lieu et elle est signalee. date permet de
+    regarder un autre jour ; par defaut aujourd'hui.
     """
     date_iso = _date(date) or _aujourdhui()
     grille, meta = _grille_admin(date_iso, sujet=sujet)
@@ -638,6 +748,7 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
         "lignes_de_postes": meta["n_postes"],
         "demi_journees_travaillees": presences,
         "cahiers_a_revoir": meta["ecarts"],
+        "sans_postes_declares": meta["sans_cahier"],
         "services_sans_departement": meta["sans_departement"],
         "sans_couleur": sans_couleur,
         "lignes": len(grille),
