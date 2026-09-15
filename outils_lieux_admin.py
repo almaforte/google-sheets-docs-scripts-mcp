@@ -72,6 +72,13 @@ moteur, rien ne se saisit ici : l'onglet est protege, et la nomenclature
 se corrige dans Registre - Postes admin (Service, Poste, Taux ; jamais
 Departement, qui se calcule).
 
+La meme vue est portee dans Almaval - Patients, que consultent les
+collaborateurs (demande d'Alberto le 15.09.2026 au soir), dans un onglet
+a elle, « Postes admin », cree a cote de l'occupation des bureaux et non
+dedans : deux tableaux ne partagent pas un onglet, et les deux vues n'ont
+ni le meme nombre de colonnes ni les memes largeurs. _poser ecrit un
+onglet de zero, et sert les deux classeurs.
+
 Facon de poser la charte. Les grilles d'occupation n'ont qu'une ligne
 entre les noms et le premier matin, la ligne des numeros, et _blocs ne
 sait lire que cette geometrie. Cette vue en a plusieurs, le cahier des
@@ -92,12 +99,13 @@ from outils_lieux_socle import (
     HAUTEUR_ENTETE,
     ID_EFFECTIF,
     ID_LIEUX,
+    ID_PATIENTS,
     JOURS,
     ONGLET_EFFECTIF,
+    ONGLET_PATIENTS,
     _aujourdhui,
     _cellule,
     _colonne,
-    _creer_onglet,
     _date,
     _date_serie,
     _ecrire,
@@ -121,6 +129,12 @@ from outils_lieux_charte import (
 
 
 ONGLET_VUE_ADMIN = "Vue admin"
+# La meme vue, portee dans le classeur que consultent les collaborateurs
+# (demande d'Alberto le 15.09.2026 au soir). Un onglet a elle, a cote de
+# l'occupation des bureaux et non dedans : deux tableaux ne partagent pas
+# un onglet, et les deux vues n'ont ni le meme nombre de colonnes ni les
+# memes largeurs.
+ONGLET_ADMIN_PATIENTS = "Postes admin"
 SITE_ADMIN = "ADMINISTRATION"
 MOT_PRESENT = "Présent"
 MOT_TELETRAVAIL = "Télétravail"
@@ -281,8 +295,7 @@ def _postes_declares(sujet: str = ""):
     l'ordre des lignes ; une ligne va sous sa cle quand elle en porte
     une, sous son nom sinon. Le troisieme dictionnaire donne l'ordre des
     colonnes de la vue : celui des lignes du registre, qu'Alberto range
-    a sa main (15.09.2026 au soir). Le departement de chaque ligne est
-    calcule depuis son
+    a sa main (15.09.2026 au soir). Le departement de chaque ligne est calcule depuis son
     service (SERVICES_VERS_DEPARTEMENT), jamais lu dans le registre. Sans
     l'onglet, la vue se fait avec les services du registre."""
     try:
@@ -773,14 +786,14 @@ def _charte_admin(sid: int, grille, meta, couleurs):
     return requetes
 
 
-def _page_blanche(sid: int, sujet: str = ""):
+def _page_blanche(sid: int, classeur: str = ID_LIEUX, onglet: str = ONGLET_VUE_ADMIN, sujet: str = ""):
     """Defusionne, efface formats, validations, regles, protections et
     bandes de l'onglet, puis ses valeurs : la vue se reecrit de zero."""
     requetes = [
         {"unmergeCells": {"range": {"sheetId": sid}}},
         {"updateCells": {"range": {"sheetId": sid}, "fields": "userEnteredFormat,dataValidation"}},
     ]
-    for feuille in _etat_complet(sujet=sujet):
+    for feuille in _etat_complet(classeur, sujet=sujet):
         if feuille["properties"]["sheetId"] != sid:
             continue
         for bande in feuille.get("bandedRanges", []):
@@ -789,15 +802,57 @@ def _page_blanche(sid: int, sujet: str = ""):
             requetes.append({"deleteProtectedRange": {"protectedRangeId": protection["protectedRangeId"]}})
         for k in range(len(feuille.get("conditionalFormats", [])) - 1, -1, -1):
             requetes.append({"deleteConditionalFormatRule": {"sheetId": sid, "index": k}})
-    _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
-    _vider(ONGLET_VUE_ADMIN, sujet=sujet)
+    _feuilles(sujet).batchUpdate(spreadsheetId=classeur, body={"requests": requetes}).execute()
+    _vider(onglet, classeur, sujet=sujet)
+
+
+def _poser(classeur: str, onglet: str, grille, meta, couleurs, sujet: str = ""):
+    """Ecrit la vue dans un onglet, de zero : page blanche, geometrie,
+    valeurs, fusions, charte. Le meme rendu sert dans le classeur des
+    lieux et dans celui que consultent les collaborateurs. Rend le
+    sheetId de l'onglet ecrit."""
+    proprietes = _onglets(classeur, sujet=sujet)
+    if onglet not in proprietes:
+        # a cote de l'occupation des bureaux quand elle est la, en fin de
+        # classeur sinon
+        voisin = proprietes.get(ONGLET_PATIENTS)
+        creation = {"title": onglet, "gridProperties": {
+            "rowCount": len(grille), "columnCount": max(meta["largeur"], 2)}}
+        if voisin and "index" in voisin:
+            creation["index"] = voisin["index"] + 1
+        _feuilles(sujet).batchUpdate(spreadsheetId=classeur, body={"requests": [
+            {"addSheet": {"properties": creation}}]}).execute()
+        proprietes = _onglets(classeur, sujet=sujet)
+    sid = proprietes[onglet]["sheetId"]
+    _page_blanche(sid, classeur, onglet, sujet=sujet)
+    # Degeler d'abord, redimensionner ensuite : en une seule requete,
+    # Sheets confronte le nouveau nombre de colonnes aux colonnes encore
+    # figees et refuse (« impossible de supprimer toutes les colonnes non
+    # figées », 15.09.2026).
+    _feuilles(sujet).batchUpdate(spreadsheetId=classeur, body={"requests": [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 0, "frozenColumnCount": 0}},
+            "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}},
+        {"updateSheetProperties": {
+            "properties": {"sheetId": sid, "gridProperties": {
+                "rowCount": len(grille), "columnCount": max(meta["largeur"], 2)}},
+            "fields": "gridProperties.rowCount,gridProperties.columnCount"}},
+    ]}).execute()
+    _ecrire(onglet, "A1:" + _lettre(meta["largeur"] - 1) + str(len(grille)), grille, classeur, sujet=sujet)
+    if meta["personnes"]:
+        fusions = _fusions_admin(sid, grille, meta)
+        if fusions:
+            _feuilles(sujet).batchUpdate(spreadsheetId=classeur, body={"requests": fusions}).execute()
+        habillage = _charte_admin(sid, grille, meta, couleurs)
+        _feuilles(sujet).batchUpdate(spreadsheetId=classeur, body={"requests": habillage}).execute()
+    return sid
 
 
 # -------------------------------------------------------------------- outil
 
 @mcp.tool()
 @tolerant
-def lieux_vue_admin(date: str = "", sujet: str = ""):
+def lieux_vue_admin(date: str = "", publier: bool = True, sujet: str = ""):
     """Reconstruit la vue des postes admin par personne, onglet Vue admin.
 
     Meme facture que la Vue actuelle, la personne en tete de colonne.
@@ -809,39 +864,20 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
     journee. Toute personne a part administrative y figure ; sans postes
     declares, ses services du registre en tiennent lieu et elle est
     signalee. date permet de regarder un autre jour ; par defaut
-    aujourd'hui.
+    aujourd'hui. La meme vue est portee dans l'onglet « Postes admin »
+    d'Almaval - Patients, que consultent les collaborateurs ; publier a
+    faux s'en tient au classeur des lieux.
     """
     date_iso = _date(date) or _aujourdhui()
     grille, meta = _grille_admin(date_iso, sujet=sujet)
     couleurs = _couleurs_personnes(sujet=sujet)
 
-    proprietes = _onglets(sujet=sujet)
-    if ONGLET_VUE_ADMIN not in proprietes:
-        _creer_onglet(ONGLET_VUE_ADMIN, len(grille), max(meta["largeur"], 2), sujet=sujet)
-        proprietes = _onglets(sujet=sujet)
-    sid = proprietes[ONGLET_VUE_ADMIN]["sheetId"]
-    _page_blanche(sid, sujet=sujet)
-    # Degeler d'abord, redimensionner ensuite : en une seule requete,
-    # Sheets confronte le nouveau nombre de colonnes aux colonnes encore
-    # figees et refuse (« impossible de supprimer toutes les colonnes non
-    # figées », 15.09.2026).
-    _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": [
-        {"updateSheetProperties": {
-            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 0, "frozenColumnCount": 0}},
-            "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}},
-        {"updateSheetProperties": {
-            "properties": {"sheetId": sid, "gridProperties": {
-                "rowCount": len(grille), "columnCount": max(meta["largeur"], 2)}},
-            "fields": "gridProperties.rowCount,gridProperties.columnCount"}},
-    ]}).execute()
-    _ecrire(ONGLET_VUE_ADMIN, "A1:" + _lettre(meta["largeur"] - 1) + str(len(grille)), grille, sujet=sujet)
-
-    if meta["personnes"]:
-        fusions = _fusions_admin(sid, grille, meta)
-        if fusions:
-            _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": fusions}).execute()
-        habillage = _charte_admin(sid, grille, meta, couleurs)
-        _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": habillage}).execute()
+    sid = _poser(ID_LIEUX, ONGLET_VUE_ADMIN, grille, meta, couleurs, sujet=sujet)
+    lien_patients = ""
+    if publier:
+        sid_patients = _poser(ID_PATIENTS, ONGLET_ADMIN_PATIENTS, grille, meta, couleurs, sujet=sujet)
+        lien_patients = ("https://docs.google.com/spreadsheets/d/" + ID_PATIENTS
+                         + "/edit#gid=" + str(sid_patients))
 
     sans_couleur = [n for n in meta["personnes"] if not couleurs.get(n)]
     presences = sum(len(v) for v in meta["presences"].values())
@@ -849,7 +885,8 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
                    str(len(meta["personnes"])) + " personnes, " + str(len(meta["ecarts"]))
                    + " cahiers des charges à revoir, au " + _jolie_date(date_iso)]], sujet=sujet)
     return {
-        "onglet": ONGLET_VUE_ADMIN,
+        "onglet": "https://docs.google.com/spreadsheets/d/" + ID_LIEUX + "/edit#gid=" + str(sid),
+        "onglet_patients": lien_patients,
         "date": date_iso,
         "personnes": meta["personnes"],
         "lignes_de_postes": meta["n_postes"],
@@ -887,7 +924,8 @@ try:
             morceaux = brut.split()
         if morceaux and morceaux[0].lower() in ("vueadmin", "vue_admin"):
             params = dict(m.split("=", 1) for m in morceaux[1:] if "=" in m)
-            return lieux_vue_admin(date=params.get("date", ""))
+            publier = str(params.get("publier", "1")).lower() not in ("0", "faux", "false", "non")
+            return lieux_vue_admin(date=params.get("date", ""), publier=publier)
         return _pont_d_origine(brut)
 
     _outils_lieux._pont = _pont
