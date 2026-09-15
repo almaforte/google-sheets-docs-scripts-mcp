@@ -195,6 +195,34 @@ FAMILLES_DELEGUEES = [
 ]
 
 
+def _compte_delegue():
+    """Adresse et ID client du compte de service, lus dans la cle elle-meme.
+
+    POURQUOI CE DETOUR. L'ID client etait autrefois recopie en dur dans
+    le message d'aide ci-dessous. Le 15.09.2026, la console
+    d'administration de corsalis.ch a refuse ce numero comme « ID client
+    incorrect » : il ne correspondait a aucun compte de service existant,
+    et il a fait perdre un aller-retour entier a chercher une panne de
+    delegation la ou il n'y avait qu'une constante perimee. Le champ
+    client_id du fichier de cle EST l'identifiant que la console attend :
+    le lire supprime la possibilite meme de cette erreur.
+    """
+    try:
+        import json
+        import os
+
+        brut = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+        if not brut:
+            return ("(GOOGLE_SERVICE_ACCOUNT_JSON absente)", "(inconnu)")
+        infos = json.loads(brut)
+        return (
+            str(infos.get("client_email", "(sans adresse)")),
+            str(infos.get("client_id", "(sans client_id)")),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return ("(cle illisible : " + str(exc)[:120] + ")", "(inconnu)")
+
+
 def _sonder_delegation() -> None:
     try:
         from google.auth.transport.requests import Request
@@ -222,13 +250,18 @@ def _sonder_delegation() -> None:
             else:
                 refusees.append(nom + " (" + detail[:120] + ")")
 
+    adresse, identifiant = _compte_delegue()
     _ligne("delegation au nom de " + personne)
+    _ligne(
+        "compte de service delegue : " + adresse
+        + " | ID client a declarer dans la console : " + identifiant
+    )
     _ligne("delegation ACCORDEE : " + (", ".join(accordees) or "aucune"))
     if refusees:
         _ligne("delegation REFUSEE : " + ", ".join(refusees))
         _ligne(
             "corriger dans admin.google.com, Securite puis Controle des API puis "
-            "Delegation au niveau du domaine, sur l'ID client 104042938496749371416"
+            "Delegation au niveau du domaine, sur l'ID client " + identifiant
         )
     else:
         _ligne("delegation : toutes les familles sont autorisees")
