@@ -48,11 +48,14 @@ et Forte Alberto M. (Directeur medical) et Devaud Oceane (Referente
 clinique ADC) portaient « Soins » comme service, qui est en realite le
 nom du departement, leur service etant Clinique.
 
-Chaque personne occupe quatre colonnes. Au-dessus, la bande du haut
-garde la granularite fine demandee par Alberto le 15.09.2026 (deuxieme
-demande du soir) : le service du poste le plus lourd de la personne
-(Finances, RH, Secretariat, Logistique, Formation, Proximite, Clinique,
-Service social...), jamais l'etiquette large d'un departement. Le rang
+Chaque personne occupe quatre colonnes. Plus de bande au-dessus des
+noms : Alberto l'a fait retirer le 15.09.2026 au soir, parce que la vue
+est une vue par personne et non par departement, et que beaucoup de
+personnes tiennent des postes a cheval sur plusieurs departements et
+plusieurs services, qu'une seule etiquette au-dessus de leur nom ne
+peut pas dire sans mentir. Le departement et le service se lisent donc
+ligne par ligne, dans le cahier des charges. Une vue par departement et
+par service se fera a part. Le rang
 de tri, lui, ne bouge pas : il reste celui des services de Registre -
 Engagements, sauf pour les formateurs qui dispensent la formation
 (Cuisenier Bourquin Catherine, Lievens Laurent), avances en fin de bloc
@@ -92,7 +95,6 @@ from outils_lieux_socle import (
     JOURS,
     ONGLET_EFFECTIF,
     _aujourdhui,
-    _blocs,
     _cellule,
     _colonne,
     _creer_onglet,
@@ -115,7 +117,6 @@ from outils_lieux_charte import (
     _couleurs_personnes,
     _requetes_charte_bureaux,
     _requetes_hauteurs,
-    _segments_etage,
 )
 
 
@@ -126,9 +127,6 @@ MOT_TELETRAVAIL = "Télétravail"
 NON_TRAVAILLE = "Non travaillé"
 A_REPARTIR = "À répartir"
 ROSE = "#f4cccc"
-# Etiquette de la bande du haut : le SERVICE du poste le plus lourd (fin,
-# demande d'Alberto le 15.09.2026 au soir), jamais le departement large.
-LIBELLE_BANDE = "Service"
 LIBELLE_CAHIER = "Cahier des charges"
 LIBELLE_TOTAL = "Total EPT admin"
 COLONNES_PERSONNE = ("Département", "Service", "Poste", "Taux")
@@ -280,17 +278,6 @@ def _departement_du_service(service: str) -> str:
     return SERVICES_VERS_DEPARTEMENT.get(_normaliser(service), "")
 
 
-def _service_principal(cahier):
-    """Le service du poste le plus lourd d'une personne, pour la bande
-    du haut : celui du plus fort taux, le premier declare l'emporte a
-    egalite. Chaine vide si le cahier est vide ou ne porte qu'un « À
-    répartir » sans service."""
-    candidats = [(s, t) for _, s, p, t in cahier if p != A_REPARTIR and s]
-    if not candidats:
-        return ""
-    return max(candidats, key=lambda x: x[1])[0]
-
-
 def _postes_declares(sujet: str = ""):
     """La nomenclature saisie dans Registre - Postes admin : rend
     ({cle d'engagement normalisee: [(departement, service, poste, taux)]},
@@ -440,8 +427,7 @@ def _mot(lieu: str) -> str:
 def _grille_admin(date_iso: str, sujet: str = ""):
     """La grille de la vue, en memoire, et ce qu'il faut pour l'habiller.
 
-    Une ligne de titre, la bande des services (la plus lourde de chaque
-    personne), la ligne des noms (le nom repete sur ses quatre colonnes,
+    Une ligne de titre, la ligne des noms (le nom repete sur ses quatre colonnes,
     que la fusion reduira a une seule cellule), la ligne des intitules du
     cahier des charges, une ligne par poste, la ligne « À répartir »
     quand elle a lieu d'etre, le total, puis les douze demi-journees.
@@ -516,23 +502,16 @@ def _grille_admin(date_iso: str, sujet: str = ""):
 
     titre = "Postes admin par personne au " + _jolie_date(date_iso)
     grille = [[titre] + [""] * (largeur - 1)]
-    bande = vide()
-    bande[0] = LIBELLE_BANDE
     entete = vide()
     entete[0] = "Jour"
     entete[1] = SITE_ADMIN
     intitules = vide()
     intitules[0] = LIBELLE_CAHIER
-    precedent = None
     for k, nom in enumerate(personnes):
         c = 2 + 4 * k
-        service = _service_principal(cahiers[k]) or service_de(fiches[nom])
-        if service and service != precedent:
-            bande[c] = service
-        precedent = service or precedent
         entete[c] = entete[c + 1] = entete[c + 2] = entete[c + 3] = nom
         intitules[c], intitules[c + 1], intitules[c + 2], intitules[c + 3] = COLONNES_PERSONNE
-    grille += [bande, entete, intitules]
+    grille += [entete, intitules]
 
     r_attributs = len(grille)
     roses = []  # (ligne, colonne) a peindre en rose
@@ -587,9 +566,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     meta = {
         "personnes": personnes,
         "largeur": largeur,
-        "r_departements": 1,
-        "r_entete": 2,
-        "r_intitules": 3,
+        "r_entete": 1,
+        "r_intitules": 2,
         "r_attributs": list(range(r_attributs, r_jours)),
         "r_jours": r_jours,
         "r_fin": len(grille),
@@ -633,23 +611,17 @@ def _decaler(objet, seuil: int, decalage: int):
 # ----------------------------------------------------------------- habillage
 
 def _fusions_admin(sid: int, grille, meta):
-    """Les fusions de la vue : etiquettes sur deux colonnes, services
-    d'un seul tenant, nom sur ses quatre colonnes, jour sur ses deux
-    lignes, presence sur quatre colonnes et, pour une journee entiere,
-    sur ses deux lignes."""
+    """Les fusions de la vue : etiquettes sur deux colonnes, nom sur ses
+    quatre colonnes, jour sur ses deux lignes, presence sur quatre
+    colonnes et, pour une journee entiere, sur ses deux lignes."""
     def fusion(r0, r1, c0, c1):
         return {"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": sid, "startRowIndex": r0, "endRowIndex": r1,
             "startColumnIndex": c0, "endColumnIndex": c1}}}
 
     requetes = []
-    for r in [meta["r_departements"], meta["r_intitules"]] + meta["r_attributs"]:
+    for r in [meta["r_intitules"]] + meta["r_attributs"]:
         requetes.append(fusion(r, r + 1, 0, 2))
-    facade = _facade(grille, meta)
-    for bloc in _blocs(facade):
-        for a, b in _segments_etage(facade, bloc):
-            if b > a and a != bloc["colonne_jour"]:
-                requetes.append(fusion(meta["r_departements"], meta["r_departements"] + 1, a, b + 1))
     for k in range(len(meta["personnes"])):
         c = 2 + 4 * k
         requetes.append(fusion(meta["r_entete"], meta["r_entete"] + 1, c, c + 4))
@@ -746,7 +718,7 @@ def _charte_admin(sid: int, grille, meta, couleurs):
     # colonne
     for k in range(n):
         c = 2 + 4 * k
-        requetes.append(bords(meta["r_departements"], r_fin, c, c + 4, innerVertical=aucun))
+        requetes.append(bords(meta["r_entete"], r_fin, c, c + 4, innerVertical=aucun))
 
     # un filet tirete entre deux postes, un filet fin avant le total
     if meta["r_attributs"]:
@@ -755,10 +727,10 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             requetes.append(bords(r, r + 1, 0, meta["largeur"], top=tirete))
         requetes.append(bords(r_total, r_total + 1, 0, meta["largeur"], top=fin))
 
-    # un filet moyen entre deux personnes, de la bande des services au samedi
+    # un filet moyen entre deux personnes, de la ligne des noms au samedi
     for k in range(1, n):
         c = 2 + 4 * k
-        requetes.append(bords(meta["r_departements"], r_fin, c, c + 1, left=filet))
+        requetes.append(bords(meta["r_entete"], r_fin, c, c + 1, left=filet))
 
     # « Présent » aux couleurs de la personne, « Télétravail » en gris
     for k, nom in enumerate(meta["personnes"]):
