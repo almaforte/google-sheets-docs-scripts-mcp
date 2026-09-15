@@ -137,7 +137,15 @@ ONGLET_VUE_ADMIN = "Vue admin"
 # un onglet, et les deux vues n'ont ni le meme nombre de colonnes ni les
 # memes largeurs.
 ONGLET_ADMIN_PATIENTS = "Postes admin"
-SITE_ADMIN = "ADMINISTRATION"
+# La cellule a droite de « Jour », en ligne d'en-tete, porte le nom du
+# site dans les grilles d'occupation. Ici elle reste vide : Alberto a
+# retire le mot ADMINISTRATION le 15.09.2026 (« je vais l'enlever, faut
+# pas le remettre »), la vue etant une vue par personne et non par lieu.
+SITE_ADMIN = ""
+# _blocs reconnait un bloc a une cellule « Jour » suivie d'un site non
+# vide : la facade, qui ne sert qu'a calculer la charte et n'est jamais
+# ecrite, garde donc un marqueur technique a cette place.
+SITE_ADMIN_TECHNIQUE = "ADMIN"
 MOT_PRESENT = "Présent"
 MOT_TELETRAVAIL = "Télétravail"
 NON_TRAVAILLE = "Non travaillé"
@@ -606,9 +614,18 @@ def _grille_admin(date_iso: str, sujet: str = ""):
 
 def _facade(grille, meta):
     """La meme grille sans les lignes du cahier des charges : une ligne
-    entre les noms et le premier matin, la geometrie que _blocs sait lire."""
+    entre les noms et le premier matin, la geometrie que _blocs sait lire.
+
+    La cellule du site est vide dans la vue livree, mais _blocs a besoin
+    d'y lire quelque chose pour reconnaitre le bloc : la facade, qui ne
+    sert qu'au calcul de la charte, porte un marqueur technique."""
     exclues = set(meta["r_attributs"])
-    return [list(l) for r, l in enumerate(grille) if r not in exclues]
+    facade = [list(l) for r, l in enumerate(grille) if r not in exclues]
+    r_entete = meta["r_entete"]
+    if 0 <= r_entete < len(facade) and len(facade[r_entete]) > 1:
+        if not str(facade[r_entete][1] or "").strip():
+            facade[r_entete][1] = SITE_ADMIN_TECHNIQUE
+    return facade
 
 
 def _decaler(objet, seuil: int, decalage: int):
