@@ -717,7 +717,7 @@ def lieux_cycle(sujet: str = ""):
     agendas et la Planification. Un sujet qui contient « construire »
     aplatit d'abord la grille, comme avant. « action:nom clef=valeur »
     route vers un autre outil : consolider, quotidien, vue_jour,
-    charte_attributions, et tous ceux d'outils_lieux.
+    charte_attributions, organigramme, et tous ceux d'outils_lieux.
     """
     texte = str(sujet or "")
     if texte.startswith("action:"):
@@ -733,6 +733,8 @@ def lieux_cycle(sujet: str = ""):
             return lieux_charte_attributions()
         if nom == "construire":
             return lieux_construire_attributions()
+        if nom == "organigramme":
+            return lieux_publier_organigramme_patients()
         return outils_lieux._pont(reste)
     if "CONSTRUIRE" in _normaliser(texte):
         attributions = lieux_construire_attributions(sujet=sujet)
