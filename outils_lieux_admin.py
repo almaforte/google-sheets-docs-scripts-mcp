@@ -719,13 +719,18 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
         proprietes = _onglets(sujet=sujet)
     sid = proprietes[ONGLET_VUE_ADMIN]["sheetId"]
     _page_blanche(sid, sujet=sujet)
+    # Degeler d'abord, redimensionner ensuite : en une seule requete,
+    # Sheets confronte le nouveau nombre de colonnes aux colonnes encore
+    # figees et refuse (« impossible de supprimer toutes les colonnes non
+    # figées », 15.09.2026).
     _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": [
         {"updateSheetProperties": {
+            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 0, "frozenColumnCount": 0}},
+            "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}},
+        {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {
-                "rowCount": len(grille), "columnCount": max(meta["largeur"], 2),
-                "frozenRowCount": 0, "frozenColumnCount": 0}},
-            "fields": "gridProperties.rowCount,gridProperties.columnCount,"
-                      "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}},
+                "rowCount": len(grille), "columnCount": max(meta["largeur"], 2)}},
+            "fields": "gridProperties.rowCount,gridProperties.columnCount"}},
     ]}).execute()
     _ecrire(ONGLET_VUE_ADMIN, "A1:" + _lettre(meta["largeur"] - 1) + str(len(grille)), grille, sujet=sujet)
 
