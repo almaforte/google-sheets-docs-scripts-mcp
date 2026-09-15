@@ -25,9 +25,20 @@ taux se confronte a l'EPT administratif de l'engagement : en rose s'il
 le depasse, et une ligne « À répartir » en rose pour la part qu'aucun
 poste ne porte.
 
-Chaque personne occupe trois colonnes. Au-dessus, la bande des
-departements (Direction, Administration, Thérapies, lus dans Services -
-Responsables d'Almaval - Listes), comme la bande des etages ailleurs.
+Chaque personne occupe trois colonnes. Au-dessus, la bande du
+departement, comme la bande des etages ailleurs : depuis le 15.09.2026
+(deuxieme demande d'Alberto le jour meme), ce n'est plus le departement
+large (Direction, Administration, Thérapies) qui s'y affiche mais le
+departement du poste le plus lourd de la personne, tel que declare dans
+Registre - Postes admin (Finances, RH, Secrétariat, Logistique,
+Formation, Proximité, Soins...) : la bande se lit directement, sans
+l'etiquette « Administration » qui melangeait des metiers distincts.
+Deux mots dictes pour le meme departement (Santé et Soins) sont
+harmonises en Soins. Le rang de tri, lui, ne bouge pas : il reste celui
+des services de Registre - Engagements, sauf pour les formateurs qui
+dispensent la formation (Cuisenier Bourquin Catherine, Lievens Laurent),
+avances en fin de bloc administratif, juste avant les Thérapies, parce
+qu'ils s'en rapprochent plus que les postes de pilotage de la formation.
 Sous son nom, la ligne « Cahier des charges » sur sa propre couleur,
 puis les postes, separes par un filet horizontal tirete, sans filet
 vertical entre Departement, Poste et Taux ; puis le total. Dans la
@@ -118,6 +129,15 @@ COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Département", "Poste", "T
 # Les services du registre qui ne font pas un poste a part : la part de
 # direction est inherente aux roles des poles de la direction generale.
 SERVICES_INTEGRES = ("Direction",)
+# Deux mots dictes pour le meme departement (Forte en Santé, Dévaud et
+# Martenet en Soins, 15.09.2026) : harmonises en Soins, le plus repandu
+# dans la nomenclature.
+ALIAS_DEPARTEMENTS = {"SANTE": "Soins"}
+# Les formateurs qui dispensent la formation, par opposition a ceux qui
+# la pilotent, se rapprochent des thérapeutes : places en fin de bloc
+# administratif, juste avant les Thérapies, quel que soit le rang de
+# service de la Formation (demande d'Alberto du 15.09.2026).
+FORCES_FIN_ADMIN = ("Cuisenier Bourquin Catherine", "Lievens Laurent")
 
 # Le classeur maitre des vocabulaires, et son onglet des services : un
 # service, son departement, son responsable.
@@ -183,6 +203,22 @@ def _cle_service(nom: str) -> str:
     """Le service tel que la liste des services le nomme, normalise."""
     cle = _normaliser(nom)
     return _normaliser(ALIAS_SERVICES.get(cle, nom))
+
+
+def _departement_harmonise(departement: str) -> str:
+    """Un seul mot pour deux departements dictes comme synonymes."""
+    return ALIAS_DEPARTEMENTS.get(_normaliser(departement), departement)
+
+
+def _departement_principal(cahier):
+    """Le departement du poste le plus lourd d'une personne, pour la
+    bande du haut : celui du plus fort taux, le premier declare l'emporte
+    a egalite. Chaine vide si le cahier est vide ou ne porte qu'un « À
+    répartir » sans departement."""
+    candidats = [(d, t) for d, p, t in cahier if p != A_REPARTIR and d]
+    if not candidats:
+        return ""
+    return max(candidats, key=lambda x: x[1])[0]
 
 
 def _postes_declares(sujet: str = ""):
@@ -366,7 +402,13 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     def rang_departement(departement):
         return ORDRE_DEPARTEMENTS.index(departement) if departement in ORDRE_DEPARTEMENTS else len(ORDRE_DEPARTEMENTS)
 
+    forces_fin_norm = {_normaliser(n) for n in FORCES_FIN_ADMIN}
+
     def rang(nom):
+        if _normaliser(nom) in forces_fin_norm:
+            # juste avant le premier rang de Thérapies, quel que soit le
+            # rang de service de la Formation
+            return (rang_departement(ORDRE_DEPARTEMENTS[-1]) - 0.5, 0, _normaliser(nom))
         fiche = fiches[nom]
         service = _cle_service(service_de(fiche))
         return (rang_departement(departements.get(service, "")), ordre.get(service, 999), _normaliser(nom))
@@ -378,14 +420,15 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         declare = list(declares_cle.get(_normaliser(fiche["cle"]), [])) if fiche["cle"] else []
         declare += declares_nom.get(_normaliser(nom), [])
         if declare:
-            cahier = [(d, p, round(float(t or 0.0), 3)) for d, p, t in declare]
+            cahier = [(_departement_harmonise(d), p, round(float(t or 0.0), 3)) for d, p, t in declare]
         else:
             sans_cahier.append(nom)
             lignes_postes = sorted(
                 ((-v, ordre.get(_cle_service(s), 999), s, v) for s, v in fiche["postes"].items()
                  if _cle_service(s) not in integres),
             )
-            cahier = [(departements.get(_cle_service(s), ""), s, v) for _, _, s, v in lignes_postes]
+            cahier = [(_departement_harmonise(departements.get(_cle_service(s), "")), s, v)
+                      for _, _, s, v in lignes_postes]
         reste = round(fiche["ept_admin"] - sum(v for _, _, v in cahier), 3)
         if reste > 0.0005:
             cahier.append(("", A_REPARTIR, reste))
@@ -409,7 +452,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     precedent = None
     for k, nom in enumerate(personnes):
         c = 2 + 3 * k
-        departement = departements.get(_cle_service(service_de(fiches[nom])), "")
+        departement = (_departement_principal(cahiers[k])
+                       or departements.get(_cle_service(service_de(fiches[nom])), ""))
         if departement and departement != precedent:
             bande[c] = departement
         precedent = departement or precedent
