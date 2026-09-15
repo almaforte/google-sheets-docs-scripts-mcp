@@ -29,7 +29,9 @@ Departement, calcule et non saisi (troisieme demande d'Alberto le
 15.09.2026 au soir, apres le schema de gouvernance « Almaval en trois
 departements », onzieme version, encore une proposition). Le vocabulaire
 distingue desormais autorite (Direction generale, Operations, Proximite,
-hors departement), departement (regroupe des services, a un responsable)
+hors departement, reunies sous le mot « Fonction transversale » qu'Alberto
+a retenu le 15.09.2026 au soir), departement (regroupe des services, a un
+responsable)
 et service (l'unite chiffree en EPT qu'Alberto declare dans Registre -
 Postes admin). Un service n'appartient qu'a un seul departement, la
 regle est fixe et vit dans SERVICES_VERS_DEPARTEMENT plutot que dans une
@@ -55,12 +57,10 @@ personnes tiennent des postes a cheval sur plusieurs departements et
 plusieurs services, qu'une seule etiquette au-dessus de leur nom ne
 peut pas dire sans mentir. Le departement et le service se lisent donc
 ligne par ligne, dans le cahier des charges. Une vue par departement et
-par service se fera a part. Le rang
-de tri, lui, ne bouge pas : il reste celui des services de Registre -
-Engagements, sauf pour les formateurs qui dispensent la formation
-(Cuisenier Bourquin Catherine, Lievens Laurent), avances en fin de bloc
-administratif, juste avant les Thérapies, parce qu'ils s'en rapprochent
-plus que les postes de pilotage de la formation.
+par service se fera a part. L'ordre des colonnes, lui, n'est plus celui
+des services : c'est celui des lignes de Registre - Postes admin, qu'Alberto
+range a sa main, responsables d'abord puis chargees et assistantes. Le moteur
+n'a donc plus de nom a forcer a une place.
 Sous son nom, la ligne « Cahier des charges » sur sa propre couleur,
 puis les postes, separes par un filet horizontal tirete, sans filet
 vertical entre Departement, Service, Poste et Taux ; puis le total.
@@ -152,11 +152,6 @@ COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Service", "Poste", "Taux")
 # Les services du registre qui ne font pas un poste a part : la part de
 # direction est inherente aux roles des poles de la direction generale.
 SERVICES_INTEGRES = ("Direction",)
-# Les formateurs qui dispensent la formation, par opposition a ceux qui
-# la pilotent, se rapprochent des thérapeutes : places en fin de bloc
-# administratif, juste avant les Thérapies, quel que soit le rang de
-# service de la Formation (demande d'Alberto du 15.09.2026).
-FORCES_FIN_ADMIN = ("Cuisenier Bourquin Catherine", "Lievens Laurent")
 
 # Les trois departements du schema de gouvernance « Almaval en trois
 # departements » (onzieme version, 15.09.2026, statut proposition), et
@@ -167,7 +162,7 @@ FORCES_FIN_ADMIN = ("Cuisenier Bourquin Catherine", "Lievens Laurent")
 DEPARTEMENT_SOINS = "Soins"
 DEPARTEMENT_ADMINISTRATIF = "Administratif"
 DEPARTEMENT_RESSOURCES = "Ressources et développement"
-AUTORITE = "Autorité"
+AUTORITE = "Fonction transversale"
 
 # Le departement de chaque service, fixe par le schema de gouvernance :
 # jamais une colonne a tenir a jour a la main, un service n'appartient
@@ -281,24 +276,28 @@ def _departement_du_service(service: str) -> str:
 def _postes_declares(sujet: str = ""):
     """La nomenclature saisie dans Registre - Postes admin : rend
     ({cle d'engagement normalisee: [(departement, service, poste, taux)]},
-    {nom normalise: [(departement, service, poste, taux)]}), dans l'ordre
-    des lignes ; une ligne va sous sa cle quand elle en porte une, sous
-    son nom sinon. Le departement de chaque ligne est calcule depuis son
+    {nom normalise: [(departement, service, poste, taux)]},
+    {("cle"|"nom", identifiant): rang de premiere apparition}), dans
+    l'ordre des lignes ; une ligne va sous sa cle quand elle en porte
+    une, sous son nom sinon. Le troisieme dictionnaire donne l'ordre des
+    colonnes de la vue : celui des lignes du registre, qu'Alberto range
+    a sa main (15.09.2026 au soir). Le departement de chaque ligne est
+    calcule depuis son
     service (SERVICES_VERS_DEPARTEMENT), jamais lu dans le registre. Sans
     l'onglet, la vue se fait avec les services du registre."""
     try:
         lignes = _lire(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
-        return {}, {}
+        return {}, {}, {}
     if not lignes:
-        return {}, {}
+        return {}, {}, {}
     tetes = lignes[0]
     try:
         i_service = _colonne(tetes, "Service")
         i_poste = _colonne(tetes, "Poste")
         i_taux = _colonne(tetes, "Taux")
     except RuntimeError:
-        return {}, {}
+        return {}, {}, {}
     try:
         i_cle = _colonne(tetes, "Clé engagement")
     except RuntimeError:
@@ -307,7 +306,7 @@ def _postes_declares(sujet: str = ""):
         i_nom = _colonne(tetes, "Nom prénom")
     except RuntimeError:
         i_nom = None
-    par_cle, par_nom = {}, {}
+    par_cle, par_nom, apparition = {}, {}, {}
     for ligne in lignes[1:]:
         service = str(_cellule(ligne, i_service)).strip()
         poste = str(_cellule(ligne, i_poste)).strip()
@@ -320,9 +319,11 @@ def _postes_declares(sujet: str = ""):
         nom = _normaliser(_cellule(ligne, i_nom)) if i_nom is not None else ""
         if cle:
             par_cle.setdefault(cle, []).append(entree)
+            apparition.setdefault(("cle", cle), len(apparition))
         elif nom:
             par_nom.setdefault(nom, []).append(entree)
-    return par_cle, par_nom
+            apparition.setdefault(("nom", nom), len(apparition))
+    return par_cle, par_nom, apparition
 
 
 def _engagements_admin(date_iso: str, sujet: str = ""):
@@ -445,11 +446,13 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     sous Formation). Les personnes sont groupees par departement,
     Direction puis Administration puis Thérapies (l'ancien decoupage de
     Services - Responsables, qui sert au tri), et dans le departement par
-    l'ordre des services de la liste maitre.
+    l'ordre des services de la liste maitre. L'ordre des colonnes, lui, est
+    celui des lignes de Registre - Postes admin ; le tri par service ne
+    sert plus qu'aux personnes sans postes declares, rangees apres.
     """
     ordre, departements = _services(sujet=sujet)
     fiches = _engagements_admin(date_iso, sujet=sujet)
-    declares_cle, declares_nom = _postes_declares(sujet=sujet)
+    declares_cle, declares_nom, apparition = _postes_declares(sujet=sujet)
     integres = {_cle_service(s) for s in SERVICES_INTEGRES}
 
     def service_de(fiche):
@@ -463,16 +466,21 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     def rang_departement(departement):
         return ORDRE_DEPARTEMENTS.index(departement) if departement in ORDRE_DEPARTEMENTS else len(ORDRE_DEPARTEMENTS)
 
-    forces_fin_norm = {_normaliser(n) for n in FORCES_FIN_ADMIN}
-
     def rang(nom):
-        if _normaliser(nom) in forces_fin_norm:
-            # juste avant le premier rang de Thérapies, quel que soit le
-            # rang de service de la Formation
-            return (rang_departement(ORDRE_DEPARTEMENTS[-1]) - 0.5, 0, _normaliser(nom))
+        """L'ordre des colonnes est celui des lignes de Registre - Postes
+        admin, qu'Alberto range a sa main : une personne parait a la place
+        de son premier poste declare. Celles qui n'y figurent pas encore
+        suivent, dans l'ancien ordre des services."""
         fiche = fiches[nom]
+        cle = _normaliser(fiche["cle"])
+        place = apparition.get(("cle", cle)) if cle else None
+        if place is None:
+            place = apparition.get(("nom", _normaliser(nom)))
+        if place is not None:
+            return (0, place, 0, "")
         service = _cle_service(service_de(fiche))
-        return (rang_departement(departements.get(service, "")), ordre.get(service, 999), _normaliser(nom))
+        return (1, rang_departement(departements.get(service, "")),
+                ordre.get(service, 999), _normaliser(nom))
 
     personnes = sorted(fiches, key=rang)
     cahiers, a_repartir, sans_cahier = [], {}, []
