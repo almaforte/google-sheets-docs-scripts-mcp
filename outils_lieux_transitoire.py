@@ -61,6 +61,7 @@ from outils_lieux_socle import (
     FUSEAU,
     ID_EFFECTIF,
     ID_LIEUX,
+    ID_PATIENTS,
     JAUNE,
     JOURS,
     MARQUEUR,
@@ -576,6 +577,89 @@ def lieux_vue_du_jour(date: str = "", sujet: str = ""):
 
 # ------------------------------------------------------------ passages
 
+
+# ------------------------- organigramme d'Almaval - Patients, depuis l'effectif
+
+ONGLET_ORGANIGRAMME_PATIENTS = "Organigramme"
+ONGLET_PERSONNES = "Registre - Personnes"
+COLONNES_ORGANIGRAMME_PATIENTS = [
+    "Nom", "Prénom", "GLN", "Profession", "Initiales",
+    "Responsable direct", "MD prescr.", "N. tél", "E-mail",
+]
+LIENS_VIVANTS = ("En cours", "À venir")
+
+
+def _organigramme_depuis_effectif(sujet: str = ""):
+    """Une ligne par personne en cours ou a venir, dans l'ordre des neuf
+    colonnes que l'onglet Organigramme d'Almaval - Patients affichait par
+    IMPORTRANGE depuis l'ancien classeur RH. L'identite vient de Registre -
+    Personnes ; profession, responsable direct et medecin prescripteur de
+    l'engagement retenu (vivant, portant l'EPT clinique s'il y en a un)."""
+    personnes = _lire(ONGLET_PERSONNES, ID_EFFECTIF, sujet=sujet)
+    engagements = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
+    if not personnes or not engagements:
+        return []
+    tp, te = personnes[0], engagements[0]
+    ip = {n: _colonne(tp, n) for n in ("Initiales", "Nom", "Prénom", "GLN", "N. tél", "E-mail", "Lien avec Almaval")}
+    ie = {n: _colonne(te, n) for n in ("Initiales", "État de l'engagement", "EPT clinique", "Profession",
+                                        "Responsable direct", "MD prescripteur")}
+    retenu = {}
+    for ligne in engagements[1:]:
+        ini = str(_cellule(ligne, ie["Initiales"])).strip()
+        if not ini or _cellule(ligne, ie["État de l'engagement"]) not in ETATS_ENGAGEMENT_VIVANTS:
+            continue
+        try:
+            clinique = float(str(_cellule(ligne, ie["EPT clinique"])).replace(",", ".") or 0) > 0
+        except ValueError:
+            clinique = False
+        actuel = retenu.get(ini)
+        if actuel is None or (clinique and not actuel[0]):
+            retenu[ini] = (clinique, ligne)
+    lignes = []
+    for ligne in personnes[1:]:
+        ini = str(_cellule(ligne, ip["Initiales"])).strip()
+        if not ini or _cellule(ligne, ip["Lien avec Almaval"]) not in LIENS_VIVANTS:
+            continue
+        eng = retenu.get(ini, (False, []))[1]
+        lignes.append([
+            _cellule(ligne, ip["Nom"]), _cellule(ligne, ip["Prénom"]), _cellule(ligne, ip["GLN"]),
+            _cellule(eng, ie["Profession"]) if eng else "", ini,
+            _cellule(eng, ie["Responsable direct"]) if eng else "",
+            _cellule(eng, ie["MD prescripteur"]) if eng else "",
+            _cellule(ligne, ip["N. tél"]), _cellule(ligne, ip["E-mail"]),
+        ])
+    lignes.sort(key=lambda l: (_normaliser(l[0]), _normaliser(l[1])))
+    return lignes
+
+
+@mcp.tool()
+@tolerant
+def lieux_publier_organigramme_patients(sujet: str = ""):
+    """Recopie l'organigramme dans Almaval - Patients, onglet Organigramme,
+    depuis Almaval - Collaborateurs - Effectif, a la place des IMPORTRANGE
+    qui lisaient l'ancien classeur RH - Tableau de bord (rebranchement du
+    14.09.2026). Meme geometrie qu'avant : titres en ligne 2 a partir de la
+    colonne B, trois lignes vides, donnees des la ligne 6. Ecriture brute,
+    la colonne GLN reecrite en nombre."""
+    lignes = _organigramme_depuis_effectif(sujet=sujet)
+    if not lignes:
+        raise RuntimeError("Effectif illisible, organigramme non publie")
+    derniere = _lettre(len(COLONNES_ORGANIGRAMME_PATIENTS))  # B + 8 colonnes = J
+    _feuilles(sujet).values().clear(
+        spreadsheetId=ID_PATIENTS, range="'" + ONGLET_ORGANIGRAMME_PATIENTS + "'!B2:" + derniere, body={}
+    ).execute()
+    _ecrire(ONGLET_ORGANIGRAMME_PATIENTS, "B2:" + derniere + "2", [COLONNES_ORGANIGRAMME_PATIENTS],
+            classeur=ID_PATIENTS, sujet=sujet)
+    _ecrire(ONGLET_ORGANIGRAMME_PATIENTS, "B6:" + derniere + str(5 + len(lignes)), lignes,
+            classeur=ID_PATIENTS, sujet=sujet)
+    i_gln = COLONNES_ORGANIGRAMME_PATIENTS.index("GLN")
+    col = _lettre(1 + i_gln)
+    _ecrire(ONGLET_ORGANIGRAMME_PATIENTS, col + "6:" + col + str(5 + len(lignes)),
+            [[l[i_gln]] for l in lignes], classeur=ID_PATIENTS, sujet=sujet, mode="USER_ENTERED")
+    _journaliser([[_maintenant(), ONGLET_ORGANIGRAMME_PATIENTS, "Publication vers Almaval - Patients", _aujourdhui(), "", str(len(lignes)), "Terminé", "depuis l'effectif, sans IMPORTRANGE"]], sujet=sujet)
+    return {"personnes": len(lignes),
+            "onglet": "https://docs.google.com/spreadsheets/d/" + ID_PATIENTS + "/edit#gid=1883310163"}
+
 @mcp.tool()
 @tolerant
 def lieux_passage_quotidien(sujet: str = ""):
@@ -597,9 +681,11 @@ def lieux_passage_quotidien(sujet: str = ""):
     colonnes = _appliquer_largeurs(sujet=sujet)
     patients = lieux_publier_vers_patients(confirmer=True, sujet=sujet)
     effectif = lieux_renvoyer_vers_effectif(confirmer=True, sujet=sujet)
+    organigramme = lieux_publier_organigramme_patients(sujet=sujet)
     return {"consolidation": consolidation, "charte_attributions": charte, "vue_actuelle": vue,
             "planification": planification, "colonnes_ajustees": colonnes,
-            "publication_patients": patients, "retour_effectif": effectif}
+            "publication_patients": patients, "retour_effectif": effectif,
+            "organigramme_patients": organigramme}
 
 
 # --------------------------- remplacement en douceur des anciens outils
