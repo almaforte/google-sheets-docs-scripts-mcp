@@ -701,13 +701,20 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     d'interrogation quand l'attribution est encore incertaine.
 
     Une attribution qui ne commence que plus tard n'est plus ecartee :
-    elle s'affiche « Occupée au JJ.MM.AAAA par Nom » (Alberto,
-    15.09.2026 : « au cas ou il y ait une occupation qui est prevue pour
-    dans le futur, pour pas pietiner dessus »). Le tri se fait dans
-    l'affichage, pas par un second FILTER : la grille en porte pres de
-    sept cents, et chaque filtre supplementaire se paie a chaque
-    recalcul. La comparaison de date se garde d'une cellule vide, qui en
-    feuille de calcul passe pour plus grande que tout nombre.
+    elle s'affiche « dès 01.11.2026 » (Alberto, 15.09.2026 : « au cas ou
+    il y ait une occupation qui est prevue pour dans le futur, pour pas
+    pietiner dessus »). Deux mots et une date, pas une phrase : la
+    premiere version disait « Occupée au 01.11.2026 par Monica Lourido
+    Garcia », qui deborde sur deux lignes dans une colonne de bureau et
+    se coupe, la hauteur de ligne homologuee n'en portant qu'une
+    (Alberto, le meme jour : « ca ne tient pas dans ce format, trouve un
+    systeme plus lisible, moins de mots »). Le nom se lit dans le
+    registre Attributions ; ce qui compte ici est la date a partir de
+    laquelle le bureau n'est plus libre. Le tri se fait dans l'affichage,
+    pas par un second FILTER : la grille en porte pres de sept cents, et
+    chaque filtre supplementaire se paie a chaque recalcul. La
+    comparaison de date se garde d'une cellule vide, qui en feuille de
+    calcul passe pour plus grande que tout nombre.
     """
     registre = "Attributions!$A$2:$Z"
     entetes = "Attributions!$A$1:$Z$1"
@@ -719,8 +726,8 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
                + '&SI(' + col("Collaborateur") + '="Ménage";" "&' + col("Remarque") + ';"")'
                + '&SI(REGEXMATCH(' + col("Remarque") + '&"";"' + MOTS_INCERTAINS + '");" ?";"")')
     plus_tard = '(' + col("Date de début") + '<>"")*(' + col("Date de début") + '>$D$1)'
-    montre = ('SI(' + plus_tard + ';"Occupée au "&TEXTE(' + col("Date de début")
-              + ';"dd.mm.yyyy")&" par "&' + affiche + ';' + affiche + ')')
+    montre = ('SI(' + plus_tard + ';"dès "&TEXTE(' + col("Date de début")
+              + ';"dd.mm.yyyy");' + affiche + ')')
     return (
         '=ARRAYFORMULA(SIERREUR(TEXTJOIN(", ";VRAI;FILTER(' + montre
         + ';' + col("Bâtiment") + '=' + site_ref
