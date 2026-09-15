@@ -225,7 +225,7 @@ EPT_TECHNIQUES = {
 
 def _nombre(valeur):
     """Un nombre lu dans une cellule affichee en francais, ou None."""
-    texte = str(valeur if valeur is not None else "").strip().replace(" ", "").replace(" ", "")
+    texte = str(valeur if valeur is not None else "").strip().replace("\xa0", "").replace(" ", "")
     if not texte:
         return None
     texte = texte.replace(",", ".")
