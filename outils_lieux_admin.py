@@ -15,7 +15,7 @@ Registre - Engagements donne qui est a part administrative (colonne
 <service> ») et la presence de chaque demi-journee (les douze colonnes
 qui portent le lieu). Registre - Postes admin, onglet de saisie
 d'Alberto depuis le 15.09.2026, donne la nomenclature du cahier des
-charges : par personne, une ligne par poste, Departement, Poste, Taux.
+charges : par personne, une ligne par poste, Service, Poste, Taux.
 C'est cette nomenclature que la vue ecrit ; les colonnes de services du
 registre ne servent plus qu'a defaut, pour une personne qui n'a pas
 encore de postes declares, et une ligne « Direction » ne se montre
@@ -25,29 +25,49 @@ taux se confronte a l'EPT administratif de l'engagement : en rose s'il
 le depasse, et une ligne « À répartir » en rose pour la part qu'aucun
 poste ne porte.
 
-Chaque personne occupe trois colonnes. Au-dessus, la bande du
-departement, comme la bande des etages ailleurs : depuis le 15.09.2026
-(deuxieme demande d'Alberto le jour meme), ce n'est plus le departement
-large (Direction, Administration, Thérapies) qui s'y affiche mais le
-departement du poste le plus lourd de la personne, tel que declare dans
-Registre - Postes admin (Finances, RH, Secrétariat, Logistique,
-Formation, Proximité, Soins...) : la bande se lit directement, sans
-l'etiquette « Administration » qui melangeait des metiers distincts.
-Deux mots dictes pour le meme departement (Santé et Soins) sont
-harmonises en Soins. Le rang de tri, lui, ne bouge pas : il reste celui
-des services de Registre - Engagements, sauf pour les formateurs qui
-dispensent la formation (Cuisenier Bourquin Catherine, Lievens Laurent),
-avances en fin de bloc administratif, juste avant les Thérapies, parce
-qu'ils s'en rapprochent plus que les postes de pilotage de la formation.
+Departement, calcule et non saisi (troisieme demande d'Alberto le
+15.09.2026 au soir, apres le schema de gouvernance « Almaval en trois
+departements », onzieme version, encore une proposition). Le vocabulaire
+distingue desormais autorite (Direction generale, Operations, Proximite,
+hors departement), departement (regroupe des services, a un responsable)
+et service (l'unite chiffree en EPT qu'Alberto declare dans Registre -
+Postes admin). Un service n'appartient qu'a un seul departement, la
+regle est fixe et vit dans SERVICES_VERS_DEPARTEMENT plutot que dans une
+colonne a tenir a jour a la main : Departement des soins (son nom exact
+encore ouvert entre soins, sante et therapies ; retenu pour l'instant,
+Soins, choix d'Alberto le 15.09.2026 au soir) porte Clinique et Service
+social ; Departement administratif porte Secretariat, RH, Comptabilite
+et Logistique ; Departement des ressources et du developpement porte
+Finances, Formation, Qualite, Informatique, Relations exterieures et
+Juridique. En relisant Registre - Postes admin a la lumiere de ce
+schema, deux erreurs sont apparues et ont ete corrigees a la source :
+Foery Stephanie et Schick Gabrielle etaient rattachees au service
+Finances pour leurs postes de comptabilite, alors que Comptabilite est
+un service a part, distinct de Finances, dans un autre departement ;
+et Forte Alberto M. (Directeur medical) et Devaud Oceane (Referente
+clinique ADC) portaient « Soins » comme service, qui est en realite le
+nom du departement, leur service etant Clinique.
+
+Chaque personne occupe quatre colonnes. Au-dessus, la bande du haut
+garde la granularite fine demandee par Alberto le 15.09.2026 (deuxieme
+demande du soir) : le service du poste le plus lourd de la personne
+(Finances, RH, Secretariat, Logistique, Formation, Proximite, Clinique,
+Service social...), jamais l'etiquette large d'un departement. Le rang
+de tri, lui, ne bouge pas : il reste celui des services de Registre -
+Engagements, sauf pour les formateurs qui dispensent la formation
+(Cuisenier Bourquin Catherine, Lievens Laurent), avances en fin de bloc
+administratif, juste avant les Thérapies, parce qu'ils s'en rapprochent
+plus que les postes de pilotage de la formation.
 Sous son nom, la ligne « Cahier des charges » sur sa propre couleur,
 puis les postes, separes par un filet horizontal tirete, sans filet
-vertical entre Departement, Poste et Taux ; puis le total. Dans la
-grille, le mot « Présent » sur chaque demi-journee tenue dans un lieu
-de la maison, aux couleurs de la personne, « Télétravail » en gris
-quand elle travaille de chez elle, chaque mot fondu sur la journee
+vertical entre Departement, Service, Poste et Taux ; puis le total.
+Dans la grille, le mot « Présent » sur chaque demi-journee tenue dans
+un lieu de la maison, aux couleurs de la personne, « Télétravail » en
+gris quand elle travaille de chez elle, chaque mot fondu sur la journee
 entiere comme un nom dans les autres vues. Tout est ecrit par le
 moteur, rien ne se saisit ici : l'onglet est protege, et la nomenclature
-se corrige dans Registre - Postes admin.
+se corrige dans Registre - Postes admin (Service, Poste, Taux ; jamais
+Departement, qui se calcule).
 
 Facon de poser la charte. Les grilles d'occupation n'ont qu'une ligne
 entre les noms et le premier matin, la ligne des numeros, et _blocs ne
@@ -106,11 +126,13 @@ MOT_TELETRAVAIL = "Télétravail"
 NON_TRAVAILLE = "Non travaillé"
 A_REPARTIR = "À répartir"
 ROSE = "#f4cccc"
-LIBELLE_DEPARTEMENT = "Département"
+# Etiquette de la bande du haut : le SERVICE du poste le plus lourd (fin,
+# demande d'Alberto le 15.09.2026 au soir), jamais le departement large.
+LIBELLE_BANDE = "Service"
 LIBELLE_CAHIER = "Cahier des charges"
 LIBELLE_TOTAL = "Total EPT admin"
-COLONNES_PERSONNE = ("Département", "Poste", "Taux")
-LARGEURS_PERSONNE = (84, 92, 34)
+COLONNES_PERSONNE = ("Département", "Service", "Poste", "Taux")
+LARGEURS_PERSONNE = (80, 84, 92, 34)
 LARGEUR_JOUR = 80
 LARGEUR_DEMI = 60
 # La ligne « Cahier des charges » se distingue des postes qu'elle
@@ -124,20 +146,59 @@ FILET_POSTES = "DASHED"
 
 # La nomenclature du cahier des charges, saisie par Alberto : une ligne
 # par poste, rattachee a l'engagement par sa cle, ou a defaut par le nom.
+# Departement n'y est plus une colonne depuis le 15.09.2026 au soir : il
+# se calcule depuis Service (voir SERVICES_VERS_DEPARTEMENT), pour ne pas
+# dupliquer a la main une regle fixe du schema de gouvernance.
 ONGLET_POSTES = "Registre - Postes admin"
-COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Département", "Poste", "Taux")
+COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Service", "Poste", "Taux")
 # Les services du registre qui ne font pas un poste a part : la part de
 # direction est inherente aux roles des poles de la direction generale.
 SERVICES_INTEGRES = ("Direction",)
-# Deux mots dictes pour le meme departement (Forte en Santé, Dévaud et
-# Martenet en Soins, 15.09.2026) : harmonises en Soins, le plus repandu
-# dans la nomenclature.
-ALIAS_DEPARTEMENTS = {"SANTE": "Soins"}
 # Les formateurs qui dispensent la formation, par opposition a ceux qui
 # la pilotent, se rapprochent des thérapeutes : places en fin de bloc
 # administratif, juste avant les Thérapies, quel que soit le rang de
 # service de la Formation (demande d'Alberto du 15.09.2026).
 FORCES_FIN_ADMIN = ("Cuisenier Bourquin Catherine", "Lievens Laurent")
+
+# Les trois departements du schema de gouvernance « Almaval en trois
+# departements » (onzieme version, 15.09.2026, statut proposition), et
+# l'autorite, qui n'appartient a aucun departement. Le nom du premier
+# reste ouvert entre soins, sante et therapies ; Soins est le choix
+# provisoire d'Alberto le 15.09.2026 au soir, a corriger ici seul si le
+# mot change.
+DEPARTEMENT_SOINS = "Soins"
+DEPARTEMENT_ADMINISTRATIF = "Administratif"
+DEPARTEMENT_RESSOURCES = "Ressources et développement"
+AUTORITE = "Autorité"
+
+# Le departement de chaque service, fixe par le schema de gouvernance :
+# jamais une colonne a tenir a jour a la main, un service n'appartient
+# qu'a un seul departement (ou a aucun, une autorite transversale).
+SERVICES_VERS_DEPARTEMENT = {
+    "DIRECTION GENERALE": AUTORITE,
+    "OPERATIONS": AUTORITE,
+    "PROXIMITE": AUTORITE,
+    "CLINIQUE": DEPARTEMENT_SOINS,
+    "SERVICE SOCIAL": DEPARTEMENT_SOINS,
+    "ADC": DEPARTEMENT_SOINS,
+    "SECRETARIAT": DEPARTEMENT_ADMINISTRATIF,
+    "RH": DEPARTEMENT_ADMINISTRATIF,
+    "RESSOURCES HUMAINES": DEPARTEMENT_ADMINISTRATIF,
+    "COMPTABILITE": DEPARTEMENT_ADMINISTRATIF,
+    "LOGISTIQUE": DEPARTEMENT_ADMINISTRATIF,
+    "INTENDANCE": DEPARTEMENT_ADMINISTRATIF,
+    "FINANCES": DEPARTEMENT_RESSOURCES,
+    "FORMATION": DEPARTEMENT_RESSOURCES,
+    "ENCADREMENT": DEPARTEMENT_RESSOURCES,
+    "QUALITE": DEPARTEMENT_RESSOURCES,
+    "IT": DEPARTEMENT_RESSOURCES,
+    "INFORMATIQUE": DEPARTEMENT_RESSOURCES,
+    "PARTENARIAT ET RELATIONS EXTERIEURES": DEPARTEMENT_RESSOURCES,
+    "RELATIONS EXTERIEURES": DEPARTEMENT_RESSOURCES,
+    "PARTENARIAT": DEPARTEMENT_RESSOURCES,
+    "MARKETING": DEPARTEMENT_RESSOURCES,
+    "JURIDIQUE": DEPARTEMENT_RESSOURCES,
+}
 
 # Le classeur maitre des vocabulaires, et son onglet des services : un
 # service, son departement, son responsable.
@@ -146,6 +207,11 @@ ONGLET_SERVICES = "Services - Responsables"
 # Le registre dit « EPT Direction », la liste des services dit
 # « Direction générale » : meme service.
 ALIAS_SERVICES = {"DIRECTION": "Direction générale"}
+# Ordre de tri : celui de Services - Responsables, qui porte encore au
+# 15.09.2026 l'ancienne repartition a trois valeurs (Direction,
+# Administration, Thérapies) ; sans lien avec les trois departements du
+# nouveau schema de gouvernance, qui ne sert ici qu'au calcul de la
+# colonne Departement du cahier des charges, pas au tri des personnes.
 ORDRE_DEPARTEMENTS = ("Direction", "Administration", "Thérapies")
 # Les colonnes « EPT ... » du registre qui ne sont pas des services.
 EPT_TECHNIQUES = {
@@ -159,7 +225,7 @@ EPT_TECHNIQUES = {
 
 def _nombre(valeur):
     """Un nombre lu dans une cellule affichee en francais, ou None."""
-    texte = str(valeur if valeur is not None else "").strip().replace(" ", "").replace(" ", "")
+    texte = str(valeur if valeur is not None else "").strip().replace(" ", "").replace(" ", "")
     if not texte:
         return None
     texte = texte.replace(",", ".")
@@ -177,7 +243,9 @@ def _nombre(valeur):
 def _services(sujet: str = ""):
     """Les services de la maison, dans l'ordre de Services - Responsables :
     rend ({service normalise: rang}, {service normalise: departement}).
-    Sans le classeur maitre, la vue se fait sans departements."""
+    Sans le classeur maitre, la vue se fait sans departements. Ce
+    departement-la est celui, ancien, du tri (Direction/Administration/
+    Thérapies) ; pas celui, nouveau, du cahier des charges."""
     try:
         lignes = _lire(ONGLET_SERVICES, ID_LISTES, sujet=sujet)
     except Exception:  # noqa: BLE001
@@ -205,17 +273,19 @@ def _cle_service(nom: str) -> str:
     return _normaliser(ALIAS_SERVICES.get(cle, nom))
 
 
-def _departement_harmonise(departement: str) -> str:
-    """Un seul mot pour deux departements dictes comme synonymes."""
-    return ALIAS_DEPARTEMENTS.get(_normaliser(departement), departement)
+def _departement_du_service(service: str) -> str:
+    """Le departement d'un service, calcule depuis le schema de
+    gouvernance, jamais saisi. Chaine vide si le service n'est pas
+    encore reconnu, pour que la vue le signale plutot que de deviner."""
+    return SERVICES_VERS_DEPARTEMENT.get(_normaliser(service), "")
 
 
-def _departement_principal(cahier):
-    """Le departement du poste le plus lourd d'une personne, pour la
-    bande du haut : celui du plus fort taux, le premier declare l'emporte
-    a egalite. Chaine vide si le cahier est vide ou ne porte qu'un « À
-    répartir » sans departement."""
-    candidats = [(d, t) for d, p, t in cahier if p != A_REPARTIR and d]
+def _service_principal(cahier):
+    """Le service du poste le plus lourd d'une personne, pour la bande
+    du haut : celui du plus fort taux, le premier declare l'emporte a
+    egalite. Chaine vide si le cahier est vide ou ne porte qu'un « À
+    répartir » sans service."""
+    candidats = [(s, t) for _, s, p, t in cahier if p != A_REPARTIR and s]
     if not candidats:
         return ""
     return max(candidats, key=lambda x: x[1])[0]
@@ -223,11 +293,12 @@ def _departement_principal(cahier):
 
 def _postes_declares(sujet: str = ""):
     """La nomenclature saisie dans Registre - Postes admin : rend
-    ({cle d'engagement normalisee: [(departement, poste, taux)]},
-    {nom normalise: [(departement, poste, taux)]}), dans l'ordre des
-    lignes ; une ligne va sous sa cle quand elle en porte une, sous son
-    nom sinon. Sans l'onglet, la vue se fait avec les services du
-    registre."""
+    ({cle d'engagement normalisee: [(departement, service, poste, taux)]},
+    {nom normalise: [(departement, service, poste, taux)]}), dans l'ordre
+    des lignes ; une ligne va sous sa cle quand elle en porte une, sous
+    son nom sinon. Le departement de chaque ligne est calcule depuis son
+    service (SERVICES_VERS_DEPARTEMENT), jamais lu dans le registre. Sans
+    l'onglet, la vue se fait avec les services du registre."""
     try:
         lignes = _lire(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
@@ -236,7 +307,7 @@ def _postes_declares(sujet: str = ""):
         return {}, {}
     tetes = lignes[0]
     try:
-        i_departement = _colonne(tetes, "Département")
+        i_service = _colonne(tetes, "Service")
         i_poste = _colonne(tetes, "Poste")
         i_taux = _colonne(tetes, "Taux")
     except RuntimeError:
@@ -251,12 +322,13 @@ def _postes_declares(sujet: str = ""):
         i_nom = None
     par_cle, par_nom = {}, {}
     for ligne in lignes[1:]:
-        departement = str(_cellule(ligne, i_departement)).strip()
+        service = str(_cellule(ligne, i_service)).strip()
         poste = str(_cellule(ligne, i_poste)).strip()
         taux = _nombre(_cellule(ligne, i_taux))
-        if not poste and not departement:
+        if not poste and not service:
             continue
-        entree = (departement, poste, taux if taux is not None else 0.0)
+        departement = _departement_du_service(service)
+        entree = (departement, service, poste, taux if taux is not None else 0.0)
         cle = _normaliser(_cellule(ligne, i_cle)) if i_cle is not None else ""
         nom = _normaliser(_cellule(ligne, i_nom)) if i_nom is not None else ""
         if cle:
@@ -368,23 +440,26 @@ def _mot(lieu: str) -> str:
 def _grille_admin(date_iso: str, sujet: str = ""):
     """La grille de la vue, en memoire, et ce qu'il faut pour l'habiller.
 
-    Une ligne de titre, la bande des departements, la ligne des noms (le
-    nom repete sur ses trois colonnes, que la fusion reduira a une seule
-    cellule), la ligne des intitules du cahier des charges, une ligne par
-    poste, la ligne « À répartir » quand elle a lieu d'etre, le total,
-    puis les douze demi-journees.
+    Une ligne de titre, la bande des services (la plus lourde de chaque
+    personne), la ligne des noms (le nom repete sur ses quatre colonnes,
+    que la fusion reduira a une seule cellule), la ligne des intitules du
+    cahier des charges, une ligne par poste, la ligne « À répartir »
+    quand elle a lieu d'etre, le total, puis les douze demi-journees.
 
     Le cahier des charges d'une personne est celui de Registre - Postes
     admin, dans l'ordre de ses lignes, retrouve par la cle d'engagement
-    ou, a defaut, par le nom. Sans postes declares, les services du
-    registre en tiennent lieu, par EPT decroissant, sans la Direction.
+    ou, a defaut, par le nom ; son departement est calcule depuis son
+    service (SERVICES_VERS_DEPARTEMENT). Sans postes declares, les
+    services du registre en tiennent lieu, par EPT decroissant, sans la
+    Direction.
 
     Chaque personne est rangee sous le service de sa profession quand la
     profession est un service (RH, Logistique, Secrétariat...), sinon
     sous son service le plus lourd (un psychologue a 0,1 de Formation va
     sous Formation). Les personnes sont groupees par departement,
-    Direction puis Administration puis Thérapies, et dans le departement
-    par l'ordre des services de la liste maitre.
+    Direction puis Administration puis Thérapies (l'ancien decoupage de
+    Services - Responsables, qui sert au tri), et dans le departement par
+    l'ordre des services de la liste maitre.
     """
     ordre, departements = _services(sujet=sujet)
     fiches = _engagements_admin(date_iso, sujet=sujet)
@@ -420,22 +495,21 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         declare = list(declares_cle.get(_normaliser(fiche["cle"]), [])) if fiche["cle"] else []
         declare += declares_nom.get(_normaliser(nom), [])
         if declare:
-            cahier = [(_departement_harmonise(d), p, round(float(t or 0.0), 3)) for d, p, t in declare]
+            cahier = [(d, s, p, round(float(t or 0.0), 3)) for d, s, p, t in declare]
         else:
             sans_cahier.append(nom)
             lignes_postes = sorted(
                 ((-v, ordre.get(_cle_service(s), 999), s, v) for s, v in fiche["postes"].items()
                  if _cle_service(s) not in integres),
             )
-            cahier = [(_departement_harmonise(departements.get(_cle_service(s), "")), s, v)
-                      for _, _, s, v in lignes_postes]
-        reste = round(fiche["ept_admin"] - sum(v for _, _, v in cahier), 3)
+            cahier = [(_departement_du_service(s), s, s, v) for _, _, s, v in lignes_postes]
+        reste = round(fiche["ept_admin"] - sum(v for _, _, _, v in cahier), 3)
         if reste > 0.0005:
-            cahier.append(("", A_REPARTIR, reste))
+            cahier.append(("", "", A_REPARTIR, reste))
             a_repartir[nom] = reste
         cahiers.append(cahier)
     n_postes = max([len(c) for c in cahiers] + [1])
-    largeur = 2 + 3 * len(personnes)
+    largeur = 2 + 4 * len(personnes)
 
     def vide():
         return [""] * largeur
@@ -443,7 +517,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     titre = "Postes admin par personne au " + _jolie_date(date_iso)
     grille = [[titre] + [""] * (largeur - 1)]
     bande = vide()
-    bande[0] = LIBELLE_DEPARTEMENT
+    bande[0] = LIBELLE_BANDE
     entete = vide()
     entete[0] = "Jour"
     entete[1] = SITE_ADMIN
@@ -451,39 +525,41 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     intitules[0] = LIBELLE_CAHIER
     precedent = None
     for k, nom in enumerate(personnes):
-        c = 2 + 3 * k
-        departement = (_departement_principal(cahiers[k])
-                       or departements.get(_cle_service(service_de(fiches[nom])), ""))
-        if departement and departement != precedent:
-            bande[c] = departement
-        precedent = departement or precedent
-        entete[c] = entete[c + 1] = entete[c + 2] = nom
-        intitules[c], intitules[c + 1], intitules[c + 2] = COLONNES_PERSONNE
+        c = 2 + 4 * k
+        service = _service_principal(cahiers[k]) or service_de(fiches[nom])
+        if service and service != precedent:
+            bande[c] = service
+        precedent = service or precedent
+        entete[c] = entete[c + 1] = entete[c + 2] = entete[c + 3] = nom
+        intitules[c], intitules[c + 1], intitules[c + 2], intitules[c + 3] = COLONNES_PERSONNE
     grille += [bande, entete, intitules]
 
     r_attributs = len(grille)
     roses = []  # (ligne, colonne) a peindre en rose
+    sans_departement = set()
     for p in range(n_postes):
         ligne = vide()
         ligne[0] = "Poste " + str(p + 1)
         for k in range(len(personnes)):
-            c = 2 + 3 * k
+            c = 2 + 4 * k
             if p < len(cahiers[k]):
-                departement, poste, taux = cahiers[k][p]
-                ligne[c], ligne[c + 1], ligne[c + 2] = departement, poste, taux
+                departement, service, poste, taux = cahiers[k][p]
+                ligne[c], ligne[c + 1], ligne[c + 2], ligne[c + 3] = departement, service, poste, taux
                 if poste == A_REPARTIR:
-                    roses += [(len(grille), c), (len(grille), c + 1), (len(grille), c + 2)]
+                    roses += [(len(grille), c), (len(grille), c + 1), (len(grille), c + 2), (len(grille), c + 3)]
+                elif service and not departement:
+                    sans_departement.add(service)
         grille.append(ligne)
     total = vide()
     total[0] = LIBELLE_TOTAL
     ecarts = []
     for k, nom in enumerate(personnes):
-        c = 2 + 3 * k
-        somme = round(sum(v for _, _, v in cahiers[k]), 3)
-        total[c + 2] = somme
+        c = 2 + 4 * k
+        somme = round(sum(v for _, _, _, v in cahiers[k]), 3)
+        total[c + 3] = somme
         ept_admin = fiches[nom]["ept_admin"]
         if abs(somme - ept_admin) > 0.0005:
-            roses.append((len(grille), c + 2))
+            roses.append((len(grille), c + 3))
             ecarts.append({"collaborateur": nom, "postes": somme, "ept_admin": ept_admin,
                            "lecture": "la somme des postes dépasse l'EPT administratif"})
         elif nom in a_repartir:
@@ -500,11 +576,11 @@ def _grille_admin(date_iso: str, sujet: str = ""):
             ligne[0] = jour if demi == DEMIS[0] else ""
             ligne[1] = demi
             for k, nom in enumerate(personnes):
-                c = 2 + 3 * k
+                c = 2 + 4 * k
                 lieu = fiches[nom]["presences"].get((jour, demi))
                 if lieu:
                     mot = _mot(lieu)
-                    ligne[c] = ligne[c + 1] = ligne[c + 2] = mot
+                    ligne[c] = ligne[c + 1] = ligne[c + 2] = ligne[c + 3] = mot
                     presences_jour.setdefault(k, {})[(jour, demi)] = mot
             grille.append(ligne)
 
@@ -522,7 +598,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         "ecarts": ecarts,
         "n_postes": n_postes,
         "sans_cahier": sans_cahier,
-        "sans_departement": sorted({s for c in cahiers for d, s, _ in c if not d and s != A_REPARTIR}),
+        "sans_departement": sorted(sans_departement),
     }
     return grille, meta
 
@@ -557,10 +633,10 @@ def _decaler(objet, seuil: int, decalage: int):
 # ----------------------------------------------------------------- habillage
 
 def _fusions_admin(sid: int, grille, meta):
-    """Les fusions de la vue : etiquettes sur deux colonnes, departements
-    d'un seul tenant, nom sur ses trois colonnes, jour sur ses deux
-    lignes, presence sur trois colonnes et, pour une journee entiere, sur
-    ses deux lignes."""
+    """Les fusions de la vue : etiquettes sur deux colonnes, services
+    d'un seul tenant, nom sur ses quatre colonnes, jour sur ses deux
+    lignes, presence sur quatre colonnes et, pour une journee entiere,
+    sur ses deux lignes."""
     def fusion(r0, r1, c0, c1):
         return {"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": sid, "startRowIndex": r0, "endRowIndex": r1,
@@ -575,20 +651,20 @@ def _fusions_admin(sid: int, grille, meta):
             if b > a and a != bloc["colonne_jour"]:
                 requetes.append(fusion(meta["r_departements"], meta["r_departements"] + 1, a, b + 1))
     for k in range(len(meta["personnes"])):
-        c = 2 + 3 * k
-        requetes.append(fusion(meta["r_entete"], meta["r_entete"] + 1, c, c + 3))
+        c = 2 + 4 * k
+        requetes.append(fusion(meta["r_entete"], meta["r_entete"] + 1, c, c + 4))
     for j in range(len(JOURS)):
         r_matin = meta["r_jours"] + 2 * j
         requetes.append(fusion(r_matin, r_matin + 2, 0, 1))
         for k in range(len(meta["personnes"])):
-            c = 2 + 3 * k
+            c = 2 + 4 * k
             creneaux = meta["presences"].get(k, {})
             matin, apres = creneaux.get((JOURS[j], DEMIS[0])), creneaux.get((JOURS[j], DEMIS[1]))
             if matin and matin == apres:
-                requetes.append(fusion(r_matin, r_matin + 2, c, c + 3))
+                requetes.append(fusion(r_matin, r_matin + 2, c, c + 4))
             else:
-                requetes.append(fusion(r_matin, r_matin + 1, c, c + 3))
-                requetes.append(fusion(r_matin + 1, r_matin + 2, c, c + 3))
+                requetes.append(fusion(r_matin, r_matin + 1, c, c + 4))
+                requetes.append(fusion(r_matin + 1, r_matin + 2, c, c + 4))
     return requetes
 
 
@@ -626,11 +702,11 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             "range": {"sheetId": sid, "dimension": "ROWS", "startIndex": r, "endIndex": r + 1},
             "properties": {"pixelSize": HAUTEUR_ENTETE}, "fields": "pixelSize"}})
 
-    # largeurs : les deux colonnes de gauche, puis trois par personne
+    # largeurs : les deux colonnes de gauche, puis quatre par personne
     largeurs = [(0, 1, LARGEUR_JOUR), (1, 2, LARGEUR_DEMI)]
     for k in range(n):
         for d, pixels in enumerate(LARGEURS_PERSONNE):
-            c = 2 + 3 * k + d
+            c = 2 + 4 * k + d
             largeurs.append((c, c + 1, pixels))
     for c0, c1, pixels in largeurs:
         requetes.append({"updateDimensionProperties": {
@@ -650,7 +726,7 @@ def _charte_admin(sid: int, grille, meta, couleurs):
         r0, r1 = meta["r_attributs"][0], meta["r_attributs"][-1] + 1
         # les taux en nombre, une a trois decimales
         for k in range(n):
-            c = 2 + 3 * k + 2
+            c = 2 + 4 * k + 3
             requetes.append({"repeatCell": {
                 "range": {"sheetId": sid, "startRowIndex": r0, "endRowIndex": r1,
                           "startColumnIndex": c, "endColumnIndex": c + 1},
@@ -665,11 +741,12 @@ def _charte_admin(sid: int, grille, meta, couleurs):
                 "cell": {"userEnteredFormat": {"backgroundColor": _rvb(ROSE)}},
                 "fields": "userEnteredFormat.backgroundColor"}})
 
-    # aucun filet vertical entre Departement, Poste et Taux d'une meme
-    # personne : la charte des bureaux en pose un entre chaque colonne
+    # aucun filet vertical entre Departement, Service, Poste et Taux
+    # d'une meme personne : la charte des bureaux en pose un entre chaque
+    # colonne
     for k in range(n):
-        c = 2 + 3 * k
-        requetes.append(bords(meta["r_departements"], r_fin, c, c + 3, innerVertical=aucun))
+        c = 2 + 4 * k
+        requetes.append(bords(meta["r_departements"], r_fin, c, c + 4, innerVertical=aucun))
 
     # un filet tirete entre deux postes, un filet fin avant le total
     if meta["r_attributs"]:
@@ -678,9 +755,9 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             requetes.append(bords(r, r + 1, 0, meta["largeur"], top=tirete))
         requetes.append(bords(r_total, r_total + 1, 0, meta["largeur"], top=fin))
 
-    # un filet moyen entre deux personnes, de la bande des departements au samedi
+    # un filet moyen entre deux personnes, de la bande des services au samedi
     for k in range(1, n):
-        c = 2 + 3 * k
+        c = 2 + 4 * k
         requetes.append(bords(meta["r_departements"], r_fin, c, c + 1, left=filet))
 
     # « Présent » aux couleurs de la personne, « Télétravail » en gris
@@ -688,10 +765,10 @@ def _charte_admin(sid: int, grille, meta, couleurs):
         couleur = couleurs.get(nom)
         if not couleur:
             continue
-        c = 2 + 3 * k
+        c = 2 + 4 * k
         requetes.append({"addConditionalFormatRule": {"rule": {
             "ranges": [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
-                        "startColumnIndex": c, "endColumnIndex": c + 3}],
+                        "startColumnIndex": c, "endColumnIndex": c + 4}],
             "booleanRule": {
                 "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": MOT_PRESENT}]},
                 "format": {"backgroundColor": _rvb(couleur)}},
@@ -745,13 +822,14 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
 
     Meme facture que la Vue actuelle, la personne en tete de colonne.
     Sous le nom, le cahier des charges tel que Registre - Postes admin le
-    declare (departement, poste, taux, une ligne par poste) et son
-    total, confronte a l'EPT administratif de Registre - Engagements ;
-    puis « Présent » ou « Télétravail » sur chaque demi-journee
-    travaillee, fondu sur la journee. Toute personne a part
-    administrative y figure ; sans postes declares, ses services du
-    registre en tiennent lieu et elle est signalee. date permet de
-    regarder un autre jour ; par defaut aujourd'hui.
+    declare (service, poste, taux, une ligne par poste), avec son
+    departement calcule depuis le service, et son total, confronte a
+    l'EPT administratif de Registre - Engagements ; puis « Présent » ou
+    « Télétravail » sur chaque demi-journee travaillee, fondu sur la
+    journee. Toute personne a part administrative y figure ; sans postes
+    declares, ses services du registre en tiennent lieu et elle est
+    signalee. date permet de regarder un autre jour ; par defaut
+    aujourd'hui.
     """
     date_iso = _date(date) or _aujourdhui()
     grille, meta = _grille_admin(date_iso, sujet=sujet)
@@ -798,7 +876,7 @@ def lieux_vue_admin(date: str = "", sujet: str = ""):
         "demi_journees_travaillees": presences,
         "cahiers_a_revoir": meta["ecarts"],
         "sans_postes_declares": meta["sans_cahier"],
-        "services_sans_departement": meta["sans_departement"],
+        "services_sans_departement_reconnu": meta["sans_departement"],
         "sans_couleur": sans_couleur,
         "lignes": len(grille),
         "colonnes": meta["largeur"],
