@@ -1,6 +1,6 @@
 """Almaval - moteur des lieux : ce que le passage du matin devait encore faire.
 
-Trois gestes manquaient au passage quotidien, constate le 16.09.2026.
+Quatre gestes manquaient au passage quotidien, constate le 16.09.2026.
 
 L'APLATISSEMENT DE PROPOSITIONS vers le registre des attributions. Depuis
 la migration du 13.09.2026, le passage du matin se contentait de
@@ -47,6 +47,17 @@ travaux, poses la veille dans l'agenda d'une salle, n'apparaissent
 jamais. Le depot se refait donc chaque matin, sur les huit semaines a
 venir.
 
+LE REFERENTIEL DES POSTES, recopie d'Almaval - Listes vers Almaval -
+Collaborateurs - Effectif. Le vocabulaire de la maison vit dans Almaval -
+Listes, onglet « Postes - Referentiel » : une ligne par poste, avec son
+departement calcule, son service, son sous-service et l'intitule d'EPT
+normalise « EPT Service - Poste » demande par Alberto le 16.09.2026. Les
+EPT, eux, vivent dans l'Effectif. Plutot qu'un IMPORTRANGE entre les deux
+classeurs, fragile et silencieux quand il casse, le moteur en depose une
+copie dans l'onglet masque « Aide - Postes referentiel » de l'Effectif,
+comme il est deja fait ailleurs pour les comptes MediOnline. Registre -
+Postes admin et l'onglet « Index des EPT » lisent cette copie locale.
+
 LA VUE DES POSTES ADMIN, qui lit l'EPT administratif et sa ventilation
 par service dans Registre - Engagements, et le nom de chaque poste dans
 Registre - Postes admin. Elle se regenere au passage du matin, dans le
@@ -83,9 +94,18 @@ import outils_lieux
 import outils_lieux_admin
 import outils_lieux_ponctuel
 import outils_lieux_transitoire
+from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lire
 
 
 LARGEUR_REGISTRE = 11
+
+ID_LISTES = outils_lieux_admin.ID_LISTES
+ONGLET_REFERENTIEL_POSTES = "Postes - Référentiel"
+ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
+# La copie occupe B a G ; la colonne A de l'onglet d'aide porte une
+# formule matricielle (la cle service|poste) qui ne doit jamais etre
+# ecrasee par une valeur, sous peine de #REF!.
+COLONNES_AIDE = 6
 
 _ecrire_registre_d_origine = outils_lieux._ecrire_registre
 
@@ -102,6 +122,44 @@ def _ecrire_registre_onze_colonnes(lignes, sujet: str = ""):
 
 
 outils_lieux._ecrire_registre = _ecrire_registre_onze_colonnes
+
+
+@mcp.tool()
+@tolerant
+def lieux_referentiel_postes(sujet: str = ""):
+    """Recopie le referentiel des postes d'Almaval - Listes vers l'Effectif.
+
+    Source : Almaval - Listes, onglet « Postes - Referentiel », colonnes
+    Departement, Service, Sous-service, Poste, Intitule EPT, Actif.
+    Cible : Almaval - Collaborateurs - Effectif, onglet masque « Aide -
+    Postes referentiel », colonnes B a G. Sa colonne A, la cle
+    service|poste, est une formule matricielle et n'est jamais touchee.
+
+    Lu par Registre - Postes admin, qui en tire le sous-service, le
+    departement et l'intitule normalise de chaque poste, et par l'onglet
+    « Index des EPT », qui somme les EPT par departement, service,
+    sous-service et poste.
+    """
+    lignes = _lire(ONGLET_REFERENTIEL_POSTES, ID_LISTES, sujet=sujet)
+    if len(lignes) < 2:
+        return {"erreur": "référentiel vide ou introuvable", "onglet": ONGLET_REFERENTIEL_POSTES}
+    corps = []
+    for ligne in lignes[1:]:
+        if not str((list(ligne) + [""] * 2)[1] or "").strip():
+            continue  # pas de service : ligne vide du référentiel
+        corps.append((list(ligne) + [""] * COLONNES_AIDE)[:COLONNES_AIDE])
+    if not corps:
+        return {"erreur": "aucune ligne de service dans le référentiel"}
+    _feuilles(sujet).values().clear(
+        spreadsheetId=ID_EFFECTIF,
+        range="'" + ONGLET_AIDE_POSTES + "'!B2:G",
+        body={},
+    ).execute()
+    _ecrire(ONGLET_AIDE_POSTES, "B2:G" + str(len(corps) + 1), corps,
+            classeur=ID_EFFECTIF, sujet=sujet)
+    return {"postes": len(corps),
+            "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
+            "cible": "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit"}
 
 
 def _tenter(nom, fonction, **arguments):
@@ -127,9 +185,10 @@ def lieux_passage_quotidien(sujet: str = ""):
     Consolide ensuite le registre, repose sa charte, regenere la Vue
     actuelle et la Planification, publie la vue du jour dans Almaval -
     Patients et renvoie les sites vers Registre - Engagements, puis
-    depose le ponctuel des agendas de salles et regenere la vue des
-    postes admin dans les deux classeurs. Lance chaque matin par la tache
-    planifiee « Almaval - Lieux - Passage quotidien ».
+    depose le ponctuel des agendas de salles, recopie le referentiel des
+    postes vers l'Effectif et regenere la vue des postes admin dans les
+    deux classeurs. Lance chaque matin par la tache planifiee
+    « Almaval - Lieux - Passage quotidien ».
     """
     aplatissement = _tenter(
         "aplatissement de Propositions",
@@ -140,6 +199,8 @@ def lieux_passage_quotidien(sujet: str = ""):
     resultat["aplatissement_propositions"] = aplatissement
     resultat["ponctuel_agendas"] = _tenter(
         "ponctuel des agendas", outils_lieux_ponctuel.lieux_ponctuels_agendas, sujet=sujet)
+    resultat["referentiel_postes"] = _tenter(
+        "référentiel des postes", lieux_referentiel_postes, sujet=sujet)
     resultat["vue_admin"] = _tenter(
         "vue des postes admin", outils_lieux_admin.lieux_vue_admin, publier=True, sujet=sujet)
     return resultat
@@ -161,4 +222,4 @@ except Exception as _exc:  # noqa: BLE001
     print("[lieux passage] passage quotidien non remplacé : "
           + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
 print("[lieux passage] passage quotidien " + ("enrichi" if _remplace else "inchangé")
-      + " : aplatissement, ponctuel des agendas, vue des postes admin", flush=True)
+      + " : aplatissement, ponctuel, référentiel des postes, vue des postes admin", flush=True)
