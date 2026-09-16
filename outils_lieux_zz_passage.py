@@ -1,18 +1,6 @@
 """Almaval - moteur des lieux : ce que le passage du matin devait encore faire.
 
-Trois gestes manquaient au passage quotidien, constate le 16.09.2026.
-
-L'aplatissement de Propositions vers le registre des attributions. Depuis
-la migration du 13.09.2026, le passage du matin se contentait de
-consolider le registre : un nom ecrit dans Propositions n'y remontait
-plus tout seul, il fallait demander « action:construire ». La chaine
-etait donc coupee a son premier maillon, et l'occupation des bureaux
-n'avait plus une porte d'entree unique. Alberto a tranche le 16.09.2026
-(« fais-le, attributions n'a pas encore ete utilise a ce jour donc ca
-peut changer ») : Propositions redevient la seule saisie de la semaine
-type, le registre en garde la memoire datee, tout le reste en decoule.
-Une copie du registre avant bascule dort dans l'onglet masque
-« Archive - Attributions 16092026 ».
+Deux gestes manquaient au passage quotidien, constate le 16.09.2026.
 
 Le ponctuel des agendas de salles, depose dans Almaval - Patients par
 outils_lieux_ponctuel. Sans lui, la photo du jour de l'onglet Occupation
@@ -28,16 +16,41 @@ Registre - Postes admin. Elle se regenere au passage du matin, dans le
 classeur des lieux et dans Almaval - Patients, pour qu'un taux corrige
 se voie sans qu'on ait rien a lancer.
 
-Un mot sur la porte d'entree, parce que je m'y suis trompe le 16.09.2026
-au matin. La ventilation des EPT par service se saisit dans l'onglet
-« Saisie - Collaborateurs » d'Almaval - Collaborateurs - Gestion, avec
-tout le reste du dossier du collaborateur et ses mutations ; le moteur
-d'onboarding la porte dans Registre - Engagements. J'avais transforme
-ces colonnes du registre en formules lisant Registre - Postes admin, ce
-qui creait une troisieme porte et, pire, exposait des formules
-matricielles a l'ecriture du moteur d'onboarding. Revenu en arriere le
-jour meme : le registre garde des valeurs, Registre - Postes admin ne
-declare que le NOM du poste tenu dans chaque service.
+UN TROISIEME GESTE, RETIRE LE JOUR MEME.
+Alberto a demande le 16.09.2026 que Propositions redevienne la porte
+d'entree unique de l'occupation des bureaux, l'aplatissement de la
+grille vers le registre des attributions ayant ete debranche a la
+migration du 13.09. L'aplatissement a donc ete ajoute en tete de ce
+passage, puis RETIRE dans l'heure : a l'essai, le registre Attributions
+est ressorti avec sa seule ligne d'en-tete, ses 713 lignes disparues.
+Restaurees depuis l'onglet masque « Archive - Attributions 16092026 »,
+pris juste avant l'essai.
+
+La cause n'est pas etablie. Deux pistes, a departager sur une COPIE du
+classeur et jamais en production : l'appel a ete coupe cote client au
+bout d'une minute alors que le serveur ecrivait encore, et la lecture
+est tombee entre l'effacement de l'onglet et sa reecriture ; ou
+_lire_la_grille rend desormais une grille vide, ce qui ferait ecrire un
+registre vide. La seconde piste est la plus inquietante et merite d'etre
+ecartee d'abord, la geometrie de Propositions ayant change le 15.09 avec
+le retrait du bloc ADMIN des grilles d'occupation.
+
+Tant que ce n'est pas tranche, le passage du matin NE TOUCHE PAS au
+registre autrement que par la consolidation, qui n'efface rien. Un nom
+ecrit dans Propositions ne remonte donc pas tout seul : il faut demander
+« action:construire ».
+
+Un mot sur la porte d'entree de la part administrative, parce que je m'y
+suis trompe le 16.09.2026 au matin. La ventilation des EPT par service se
+saisit dans l'onglet « Saisie - Collaborateurs » d'Almaval -
+Collaborateurs - Gestion, avec tout le reste du dossier du collaborateur
+et ses mutations ; le moteur d'onboarding la porte dans Registre -
+Engagements. J'avais transforme ces colonnes du registre en formules
+lisant Registre - Postes admin, ce qui creait une troisieme porte et,
+pire, exposait des formules matricielles a l'ecriture du moteur
+d'onboarding. Revenu en arriere le jour meme : le registre garde des
+valeurs, Registre - Postes admin ne declare que le NOM du poste tenu dans
+chaque service.
 
 Ce module ne reecrit pas outils_lieux_transitoire : il enveloppe son
 passage quotidien et remplace l'outil deja enregistre, exactement comme
@@ -74,28 +87,19 @@ def _tenter(nom, fonction, **arguments):
 def lieux_passage_quotidien(sujet: str = ""):
     """Le passage du matin, tout compris, sans confirmation.
 
-    Depuis le 16.09.2026, aplatit d'abord Propositions vers le registre
-    des attributions, de sorte qu'un nom ecrit dans la grille remonte de
-    lui-meme : une case qui apparait ouvre une ligne datee du jour meme,
-    une case qui disparait ferme la sienne au jour meme, les deux dates
-    restant a corriger a la main dans le registre, et une ligne portant
-    « Registre seul » n'est jamais close.
+    Consolide le registre Attributions, repose sa charte, regenere la Vue
+    actuelle et la Planification, publie la vue du jour dans Almaval -
+    Patients et renvoie les sites vers Registre - Engagements, puis
+    depose le ponctuel des agendas de salles et regenere la vue des
+    postes admin dans les deux classeurs. Lance chaque matin par la tache
+    planifiee « Almaval - Lieux - Passage quotidien ».
 
-    Consolide ensuite le registre Attributions, repose sa charte,
-    regenere la Vue actuelle et la Planification, publie la vue du jour
-    dans Almaval - Patients et renvoie les sites vers Registre -
-    Engagements, puis depose le ponctuel des agendas de salles et
-    regenere la vue des postes admin dans les deux classeurs. Lance
-    chaque matin par la tache planifiee
-    « Almaval - Lieux - Passage quotidien ».
+    Il n'aplatit PAS Propositions vers le registre : voir la note en tete
+    de module, l'essai du 16.09.2026 a vide le registre.
     """
-    aplatissement = _tenter(
-        "aplatissement de Propositions",
-        outils_lieux_transitoire.lieux_construire_attributions, sujet=sujet)
     resultat = _passage_d_origine(sujet=sujet)
     if not isinstance(resultat, dict):
         resultat = {"passage": resultat}
-    resultat["aplatissement_propositions"] = aplatissement
     resultat["ponctuel_agendas"] = _tenter(
         "ponctuel des agendas", outils_lieux_ponctuel.lieux_ponctuels_agendas, sujet=sujet)
     resultat["vue_admin"] = _tenter(
