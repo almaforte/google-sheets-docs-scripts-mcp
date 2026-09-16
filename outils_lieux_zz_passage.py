@@ -1,8 +1,45 @@
 """Almaval - moteur des lieux : ce que le passage du matin devait encore faire.
 
-Deux gestes manquaient au passage quotidien, constate le 16.09.2026.
+Trois gestes manquaient au passage quotidien, constate le 16.09.2026.
 
-Le ponctuel des agendas de salles, depose dans Almaval - Patients par
+L'APLATISSEMENT DE PROPOSITIONS vers le registre des attributions. Depuis
+la migration du 13.09.2026, le passage du matin se contentait de
+consolider le registre : un nom ecrit dans Propositions n'y remontait
+plus tout seul, il fallait demander « action:construire ». La chaine
+etait donc coupee a son premier maillon, et l'occupation des bureaux
+n'avait plus une porte d'entree unique. Alberto a tranche le 16.09.2026
+(« fais-le, attributions n'a pas encore ete utilise a ce jour donc ca
+peut changer ») : Propositions redevient la seule saisie de la semaine
+type, le registre en garde la memoire datee, tout le reste en decoule.
+
+LE DEFAUT QUI A VIDE LE REGISTRE, ET SA CORRECTION.
+Au premier essai, le registre Attributions est ressorti avec sa seule
+ligne d'en-tete, ses 713 lignes disparues. Restaurees depuis l'onglet
+masque « Archive - Attributions 16092026 », pris juste avant l'essai.
+
+La cause, trouvee au second essai parce que l'erreur est enfin remontee
+en clair : « Requested writing within range [Attributions!A2:K712], but
+tried writing to column [L] ». Le registre a gagne deux colonnes le
+13.09.2026, « Fin selon registre RH » et « Origine », ecrites par la
+consolidation. L'aplatissement, lui, ecrit onze colonnes, A a K. Il relit
+les lignes existantes pour en garder les dates, et les complete par
+`list(ligne) + [""] * (11 - len(ligne))` : avec treize colonnes lues, ce
+compte est negatif, la ligne reste large de treize, et l'ecriture deborde
+sur L. Or la plage A2:K a deja ete EFFACEE juste avant. L'ecriture
+echoue, et le registre reste vide.
+
+Correction ici plutot que dans outils_lieux.py, dont la moindre retouche
+coute la retransmission de soixante-douze kilo-octets par l'API GitHub :
+_ecrire_registre est enveloppe pour ramener chaque ligne a exactement
+onze colonnes. C'est l'invariant que sa plage suppose depuis toujours.
+Les colonnes L et M ne sont pas perdues : la consolidation, qui les ecrit
+par _ecrire_registre_large, passe avant et apres l'aplatissement.
+
+LEcON : un geste qui efface avant d'ecrire doit etre sur de son
+ecriture. Effacer et ecrire ne sont pas deux gestes, c'en est un seul,
+et il n'est pas atomique ici.
+
+LE PONCTUEL DES AGENDAS de salles, depose dans Almaval - Patients par
 outils_lieux_ponctuel. Sans lui, la photo du jour de l'onglet Occupation
 bureaux ne montre que le standard des contrats et les absences : un
 colloque, une formation, une location ou une indisponibilite pour
@@ -10,35 +47,11 @@ travaux, poses la veille dans l'agenda d'une salle, n'apparaissent
 jamais. Le depot se refait donc chaque matin, sur les huit semaines a
 venir.
 
-La vue des postes admin, qui lit l'EPT administratif et sa ventilation
+LA VUE DES POSTES ADMIN, qui lit l'EPT administratif et sa ventilation
 par service dans Registre - Engagements, et le nom de chaque poste dans
 Registre - Postes admin. Elle se regenere au passage du matin, dans le
 classeur des lieux et dans Almaval - Patients, pour qu'un taux corrige
 se voie sans qu'on ait rien a lancer.
-
-UN TROISIEME GESTE, RETIRE LE JOUR MEME.
-Alberto a demande le 16.09.2026 que Propositions redevienne la porte
-d'entree unique de l'occupation des bureaux, l'aplatissement de la
-grille vers le registre des attributions ayant ete debranche a la
-migration du 13.09. L'aplatissement a donc ete ajoute en tete de ce
-passage, puis RETIRE dans l'heure : a l'essai, le registre Attributions
-est ressorti avec sa seule ligne d'en-tete, ses 713 lignes disparues.
-Restaurees depuis l'onglet masque « Archive - Attributions 16092026 »,
-pris juste avant l'essai.
-
-La cause n'est pas etablie. Deux pistes, a departager sur une COPIE du
-classeur et jamais en production : l'appel a ete coupe cote client au
-bout d'une minute alors que le serveur ecrivait encore, et la lecture
-est tombee entre l'effacement de l'onglet et sa reecriture ; ou
-_lire_la_grille rend desormais une grille vide, ce qui ferait ecrire un
-registre vide. La seconde piste est la plus inquietante et merite d'etre
-ecartee d'abord, la geometrie de Propositions ayant change le 15.09 avec
-le retrait du bloc ADMIN des grilles d'occupation.
-
-Tant que ce n'est pas tranche, le passage du matin NE TOUCHE PAS au
-registre autrement que par la consolidation, qui n'efface rien. Un nom
-ecrit dans Propositions ne remonte donc pas tout seul : il faut demander
-« action:construire ».
 
 Un mot sur la porte d'entree de la part administrative, parce que je m'y
 suis trompe le 16.09.2026 au matin. La ventilation des EPT par service se
@@ -66,12 +79,29 @@ depot d'agenda.
 
 from main import mcp, tolerant
 
+import outils_lieux
 import outils_lieux_admin
 import outils_lieux_ponctuel
 import outils_lieux_transitoire
 
 
-_passage_d_origine = outils_lieux_transitoire.lieux_passage_quotidien
+LARGEUR_REGISTRE = 11
+
+_ecrire_registre_d_origine = outils_lieux._ecrire_registre
+
+
+def _ecrire_registre_onze_colonnes(lignes, sujet: str = ""):
+    """Ecrit le registre en garantissant onze colonnes par ligne.
+
+    La plage d'ecriture est A2:K. Une ligne plus large deborde sur L et
+    fait echouer l'appel apres que la plage a ete effacee, ce qui vide le
+    registre ; une ligne plus courte laisse des cellules non ecrites.
+    """
+    calibrees = [(list(l) + [""] * LARGEUR_REGISTRE)[:LARGEUR_REGISTRE] for l in lignes]
+    return _ecrire_registre_d_origine(calibrees, sujet=sujet)
+
+
+outils_lieux._ecrire_registre = _ecrire_registre_onze_colonnes
 
 
 def _tenter(nom, fonction, **arguments):
@@ -87,25 +117,35 @@ def _tenter(nom, fonction, **arguments):
 def lieux_passage_quotidien(sujet: str = ""):
     """Le passage du matin, tout compris, sans confirmation.
 
-    Consolide le registre Attributions, repose sa charte, regenere la Vue
+    Aplatit d'abord Propositions vers le registre des attributions, de
+    sorte qu'un nom ecrit dans la grille remonte de lui-meme : une case
+    qui apparait ouvre une ligne datee du jour meme, une case qui
+    disparait ferme la sienne au jour meme, les deux dates restant a
+    corriger a la main dans le registre, et une ligne portant « Registre
+    seul » n'est jamais close.
+
+    Consolide ensuite le registre, repose sa charte, regenere la Vue
     actuelle et la Planification, publie la vue du jour dans Almaval -
     Patients et renvoie les sites vers Registre - Engagements, puis
     depose le ponctuel des agendas de salles et regenere la vue des
     postes admin dans les deux classeurs. Lance chaque matin par la tache
     planifiee « Almaval - Lieux - Passage quotidien ».
-
-    Il n'aplatit PAS Propositions vers le registre : voir la note en tete
-    de module, l'essai du 16.09.2026 a vide le registre.
     """
+    aplatissement = _tenter(
+        "aplatissement de Propositions",
+        outils_lieux_transitoire.lieux_construire_attributions, sujet=sujet)
     resultat = _passage_d_origine(sujet=sujet)
     if not isinstance(resultat, dict):
         resultat = {"passage": resultat}
+    resultat["aplatissement_propositions"] = aplatissement
     resultat["ponctuel_agendas"] = _tenter(
         "ponctuel des agendas", outils_lieux_ponctuel.lieux_ponctuels_agendas, sujet=sujet)
     resultat["vue_admin"] = _tenter(
         "vue des postes admin", outils_lieux_admin.lieux_vue_admin, publier=True, sujet=sujet)
     return resultat
 
+
+_passage_d_origine = outils_lieux_transitoire.lieux_passage_quotidien
 
 _remplace = False
 try:
@@ -121,4 +161,4 @@ except Exception as _exc:  # noqa: BLE001
     print("[lieux passage] passage quotidien non remplacé : "
           + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
 print("[lieux passage] passage quotidien " + ("enrichi" if _remplace else "inchangé")
-      + " : ponctuel des agendas et vue des postes admin", flush=True)
+      + " : aplatissement, ponctuel des agendas, vue des postes admin", flush=True)
