@@ -69,6 +69,21 @@ sert pour sommer separement ce qui se budgete sur les therapies et ce qui
 reste charge de structure, sans qu'aucune saisie soit dupliquee : la
 destination est une propriete du POSTE, jamais de la personne.
 
+LA CARTE SERVICE VERS DEPARTEMENT SE NOURRIT DU REFERENTIEL. Le meme
+16.09.2026, Alberto a renomme le service Partenariat en Relations et pose
+la regle generale : tout prend depuis le referentiel, ses trois colonnes
+Departement, Service, Poste. Or SERVICES_VERS_DEPARTEMENT, dans
+outils_lieux_admin, etait une carte figee dans le code, qui ne pouvait
+donc pas connaitre un service renomme. Elle est desormais rafraichie a
+chaque copie du referentiel, depuis les colonnes Departement et Service
+elles-memes. Un garde-fou est indispensable : la colonne Departement du
+referentiel est une formule qui renvoie « service inconnu » quand la
+carte ignore le service, et sans filtre cette valeur se reinjecterait
+dans la carte, figeant l'erreur pour de bon. Seules les quatre valeurs de
+departement reconnues entrent donc dans la carte. Les cles posees dans le
+code restent en place, elles servent de filet quand la vue des postes
+admin est appelee seule, avant toute copie du referentiel.
+
 LA VUE DES POSTES ADMIN, qui lit l'EPT administratif et sa ventilation
 par service dans Registre - Engagements, et le nom de chaque poste dans
 Registre - Postes admin. Elle se regenere au passage du matin, dans le
@@ -105,7 +120,7 @@ import outils_lieux
 import outils_lieux_admin
 import outils_lieux_ponctuel
 import outils_lieux_transitoire
-from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lire
+from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lire, _normaliser
 
 
 LARGEUR_REGISTRE = 11
@@ -117,6 +132,22 @@ ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
 # formule matricielle (la cle service|poste) qui ne doit jamais etre
 # ecrasee par une valeur, sous peine de #REF!.
 COLONNES_AIDE = 9
+
+# Les quatre seules valeurs de departement qui ont le droit d'entrer dans
+# SERVICES_VERS_DEPARTEMENT. Tout le reste, a commencer par le « service
+# inconnu » que renvoie la formule du referentiel, est ecarte.
+DEPARTEMENTS_CONNUS = (
+    outils_lieux_admin.AUTORITE,
+    outils_lieux_admin.DEPARTEMENT_SOINS,
+    outils_lieux_admin.DEPARTEMENT_ADMINISTRATIF,
+    outils_lieux_admin.DEPARTEMENT_RESSOURCES,
+)
+
+# Filet pose au chargement, pour le cas ou la vue des postes admin serait
+# appelee avant toute copie du referentiel. Le service Partenariat a ete
+# renomme Relations par Alberto le 16.09.2026.
+outils_lieux_admin.SERVICES_VERS_DEPARTEMENT.setdefault(
+    _normaliser("Relations"), outils_lieux_admin.DEPARTEMENT_RESSOURCES)
 
 _ecrire_registre_d_origine = outils_lieux._ecrire_registre
 
@@ -135,6 +166,28 @@ def _ecrire_registre_onze_colonnes(lignes, sujet: str = ""):
 outils_lieux._ecrire_registre = _ecrire_registre_onze_colonnes
 
 
+def _rafraichir_carte_des_services(corps):
+    """Met a jour SERVICES_VERS_DEPARTEMENT depuis le referentiel copie.
+
+    Le referentiel est la source unique du couple Departement, Service :
+    un service renomme doit donc suffire a corriger la carte, sans
+    retoucher le code. Seules les valeurs de departement reconnues
+    entrent, pour que le « service inconnu » renvoye par la formule du
+    referentiel ne se reinjecte jamais dans la carte.
+    """
+    poses = 0
+    for ligne in corps:
+        departement = str((list(ligne) + [""] * 2)[0] or "").strip()
+        service = str((list(ligne) + [""] * 2)[1] or "").strip()
+        if not service or departement not in DEPARTEMENTS_CONNUS:
+            continue
+        cle = _normaliser(service)
+        if outils_lieux_admin.SERVICES_VERS_DEPARTEMENT.get(cle) != departement:
+            poses += 1
+        outils_lieux_admin.SERVICES_VERS_DEPARTEMENT[cle] = departement
+    return poses
+
+
 @mcp.tool()
 @tolerant
 def lieux_referentiel_postes(sujet: str = ""):
@@ -146,6 +199,9 @@ def lieux_referentiel_postes(sujet: str = ""):
     Cible : Almaval - Collaborateurs - Effectif, onglet masque « Aide -
     Postes referentiel », colonnes B a J. Sa colonne A, la cle
     service|poste, est une formule matricielle et n'est jamais touchee.
+
+    Rafraichit au passage la carte service vers departement, pour qu'un
+    service renomme dans le referentiel n'oblige pas a retoucher le code.
 
     Lu par Registre - Postes admin, qui en tire le sous-service, le
     departement et l'intitule normalise de chaque poste, et par l'onglet
@@ -163,6 +219,7 @@ def lieux_referentiel_postes(sujet: str = ""):
         corps.append((list(ligne) + [""] * COLONNES_AIDE)[:COLONNES_AIDE])
     if not corps:
         return {"erreur": "aucune ligne de service dans le référentiel"}
+    services_poses = _rafraichir_carte_des_services(corps)
     _feuilles(sujet).values().clear(
         spreadsheetId=ID_EFFECTIF,
         range="'" + ONGLET_AIDE_POSTES + "'!B2:J",
@@ -171,6 +228,7 @@ def lieux_referentiel_postes(sujet: str = ""):
     _ecrire(ONGLET_AIDE_POSTES, "B2:J" + str(len(corps) + 1), corps,
             classeur=ID_EFFECTIF, sujet=sujet)
     return {"postes": len(corps),
+            "services_mis_a_jour": services_poses,
             "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
             "cible": "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit"}
 
