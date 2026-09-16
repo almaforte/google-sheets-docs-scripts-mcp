@@ -58,6 +58,17 @@ copie dans l'onglet masque « Aide - Postes referentiel » de l'Effectif,
 comme il est deja fait ailleurs pour les comptes MediOnline. Registre -
 Postes admin et l'onglet « Index des EPT » lisent cette copie locale.
 
+Depuis le 16.09.2026 au soir la copie porte NEUF colonnes du referentiel,
+deposees de B a J, la Remarque comprise. Le referentiel a gagne ce
+jour-la « Intitule EPT abrege », le nom rapide destine au classeur de
+Gestion, et « Destination de l'EPT », qui dit si le temps de ce poste
+conditionne la facturation d'une seance (valeur Therapies : encadrement,
+supervision, ADC, direction medicale, service social) ou s'il fait
+tourner les services de support (valeur Support). L'index des EPT s'en
+sert pour sommer separement ce qui se budgete sur les therapies et ce qui
+reste charge de structure, sans qu'aucune saisie soit dupliquee : la
+destination est une propriete du POSTE, jamais de la personne.
+
 LA VUE DES POSTES ADMIN, qui lit l'EPT administratif et sa ventilation
 par service dans Registre - Engagements, et le nom de chaque poste dans
 Registre - Postes admin. Elle se regenere au passage du matin, dans le
@@ -102,10 +113,10 @@ LARGEUR_REGISTRE = 11
 ID_LISTES = outils_lieux_admin.ID_LISTES
 ONGLET_REFERENTIEL_POSTES = "Postes - Référentiel"
 ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
-# La copie occupe B a G ; la colonne A de l'onglet d'aide porte une
+# La copie occupe B a J ; la colonne A de l'onglet d'aide porte une
 # formule matricielle (la cle service|poste) qui ne doit jamais etre
 # ecrasee par une valeur, sous peine de #REF!.
-COLONNES_AIDE = 6
+COLONNES_AIDE = 9
 
 _ecrire_registre_d_origine = outils_lieux._ecrire_registre
 
@@ -130,15 +141,17 @@ def lieux_referentiel_postes(sujet: str = ""):
     """Recopie le referentiel des postes d'Almaval - Listes vers l'Effectif.
 
     Source : Almaval - Listes, onglet « Postes - Referentiel », colonnes
-    Departement, Service, Sous-service, Poste, Intitule EPT, Actif.
+    Departement, Service, Sous-service, Poste, Intitule EPT, Actif,
+    Remarque, Intitule EPT abrege, Destination de l'EPT.
     Cible : Almaval - Collaborateurs - Effectif, onglet masque « Aide -
-    Postes referentiel », colonnes B a G. Sa colonne A, la cle
+    Postes referentiel », colonnes B a J. Sa colonne A, la cle
     service|poste, est une formule matricielle et n'est jamais touchee.
 
     Lu par Registre - Postes admin, qui en tire le sous-service, le
     departement et l'intitule normalise de chaque poste, et par l'onglet
     « Index des EPT », qui somme les EPT par departement, service,
-    sous-service et poste.
+    sous-service et poste, puis separe ce qui est destine aux therapies
+    de ce qui fait tourner les services de support.
     """
     lignes = _lire(ONGLET_REFERENTIEL_POSTES, ID_LISTES, sujet=sujet)
     if len(lignes) < 2:
@@ -152,10 +165,10 @@ def lieux_referentiel_postes(sujet: str = ""):
         return {"erreur": "aucune ligne de service dans le référentiel"}
     _feuilles(sujet).values().clear(
         spreadsheetId=ID_EFFECTIF,
-        range="'" + ONGLET_AIDE_POSTES + "'!B2:G",
+        range="'" + ONGLET_AIDE_POSTES + "'!B2:J",
         body={},
     ).execute()
-    _ecrire(ONGLET_AIDE_POSTES, "B2:G" + str(len(corps) + 1), corps,
+    _ecrire(ONGLET_AIDE_POSTES, "B2:J" + str(len(corps) + 1), corps,
             classeur=ID_EFFECTIF, sujet=sujet)
     return {"postes": len(corps),
             "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
