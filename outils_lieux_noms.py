@@ -100,6 +100,16 @@ LISTE_ACCEPTEES = "Valeurs acceptées en cellule"
 # Personnes d'essai du registre, jamais proposees dans un menu.
 PREFIXES_ESSAI = ("ESSAI TEST",)
 
+# La table se lit dans deux registres larges (Personnes, Engagements) et
+# une dizaine de gestes du passage du matin la demandent chacun a leur
+# tour. Sans memoire, ces lectures ont fait deborder le quota de lecture
+# par minute de l'API Sheets le 18.09.2026 (HTTP 429, publication vers
+# Patients et retour vers l'effectif tombes). La table est donc gardee
+# deux minutes en memoire du serveur, par compte, ce qui couvre un
+# passage entier sans jamais servir une table de la veille.
+DUREE_MEMOIRE_SECONDES = 120
+_memoire = {}
+
 
 # ------------------------------------------------------------- reference
 
@@ -112,10 +122,12 @@ def _eclater_anterieurs(texte) -> list:
     return [m.strip() for m in morceaux if m.strip()]
 
 
-def _referentiel_personnes(sujet: str = ""):
+def _referentiel_personnes(sujet: str = "", rafraichir: bool = False):
     """La table de resolution des personnes, lue a la source.
 
-    Rend un dictionnaire :
+    Gardee deux minutes en memoire (DUREE_MEMOIRE_SECONDES) ; rafraichir
+    force une relecture, par exemple juste apres une saisie dans le
+    registre. Rend un dictionnaire :
       personnes : {initiales: {initiales, nom_complet, nom_usage,
                    anterieurs, vivant, essai}}
       index     : {texte normalise: initiales}, dans l'ordre de priorite
@@ -126,6 +138,19 @@ def _referentiel_personnes(sujet: str = ""):
       doublons  : [[graphie, initiales gardees, initiales ecartees]]
       vivants   : initiales dont un engagement est En cours ou À venir.
     """
+    import time
+    cle_memoire = str(sujet or "")
+    garde = _memoire.get(cle_memoire)
+    if garde and not rafraichir and time.time() - garde[0] < DUREE_MEMOIRE_SECONDES:
+        return garde[1]
+    ref = _lire_referentiel_personnes(sujet=sujet)
+    if ref["personnes"]:
+        _memoire[cle_memoire] = (time.time(), ref)
+    return ref
+
+
+def _lire_referentiel_personnes(sujet: str = ""):
+    """La lecture elle-meme, sans memoire : voir _referentiel_personnes."""
     personnes_lues = _lire(ONGLET_PERSONNES, ID_EFFECTIF, sujet=sujet)
     if not personnes_lues:
         return {"personnes": {}, "index": {}, "doublons": [], "vivants": set()}
