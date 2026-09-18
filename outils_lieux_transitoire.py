@@ -230,6 +230,7 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme, ref=No
         jour = str(_cellule(l, i["Jour"])).strip()
         demi = str(_cellule(l, i["Demi-journée"])).strip()
         identifiant = str(_cellule(l, i["Identifiant du bureau"])).strip()
+        identifiant_lu = identifiant
         remarque = str(_cellule(l, i["Remarque"])).strip()
         fiche = (par_batiment.get(_normaliser(batiment)) or {}).get(_normaliser_bureau(bureau))
         if fiche:
@@ -274,8 +275,14 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme, ref=No
         origine = ORIGINE_MAIN if MARQUE_MAIN.upper() in _normaliser(remarque) else \
             (str(_cellule(l, i["Origine"])).strip() or ORIGINE_GRILLE)
         if cle_lue != cle:
+            # Meme contenu sous une autre forme : la personne ecrite en
+            # nom ou en ancienne graphie, ou l'identifiant du bureau
+            # renouvele par le referentiel (chantier du 18.09.2026). Ni
+            # l'un ni l'autre n'est une retouche a la main.
             tete_lue = cle_lue.rsplit("|", 1)
-            meme_forme = (len(tete_lue) == 2 and tete_lue[0] == cle.rsplit("|", 1)[0]
+            tetes_admises = {cle.rsplit("|", 1)[0],
+                             "|".join([identifiant_lu or ("MENAGE:" + batiment), jour, demi])}
+            meme_forme = (len(tete_lue) == 2 and tete_lue[0] in tetes_admises
                           and _meme_personne(tete_lue[1], initiales, occupant, ref))
             l[i["Clé"]] = cle
             if not meme_forme:
