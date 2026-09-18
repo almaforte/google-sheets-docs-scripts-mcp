@@ -460,11 +460,13 @@ def lieux_construire_attributions(sujet: str = ""):
         if cle:
             anciennes[cle] = list(ligne) + [""] * (11 - len(ligne))
 
+    # La cle porte les initiales de la personne depuis le 18.09.2026 ; un
+    # type d'occupation ou un nom non resolu garde son libelle.
     voulues = {}
     for o in occupations:
         cle = "|".join([
             o["identifiant"] or ("MENAGE:" + o["batiment"]),
-            o["jour"], o["demi"], o["occupant"],
+            o["jour"], o["demi"], o.get("initiales") or o["occupant"],
         ])
         voulues[cle] = o
 
@@ -574,7 +576,7 @@ def lieux_construire_attributions(sujet: str = ""):
                 + ", gardées jusqu'à leur date de fin " + str(a_echeance)]]
     for a in anomalies:
         journal.append([horodatage, "Attributions", "Anomalie", a[1], "", a[2] if len(a) > 2 else "",
-                        "À vérifier", a[0]])
+                        "À vérifier", a[0] + ((", " + a[3]) if len(a) > 3 and a[3] else "")])
     _journaliser(journal, sujet=sujet)
 
     return {
@@ -1002,13 +1004,27 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
     registre = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)
     entetes = registre[0]
     i = {nom: _colonne(entetes, nom) for nom in [
-        "Collaborateur", "Bâtiment", "Jour", "Demi-journée", "Date de début",
+        "Clé", "Collaborateur", "Bâtiment", "Jour", "Demi-journée", "Date de début",
         "Date de fin", "Statut",
     ]}
     _, par_identifiant = _table_referentiel(sujet=sujet)
     site_par_batiment = {}
     for fiche in par_identifiant.values():
         site_par_batiment[_normaliser(fiche["nom_batiment"])] = fiche["site"]
+
+    # Les personnes se reconnaissent par leurs initiales, portees par la
+    # cle depuis le 18.09.2026, a defaut par la table de resolution. Une
+    # valeur generique (Direction, Ménage, Colloque...) n'est pas une
+    # personne : elle ne va pas dans le registre RH et ne peut pas etre
+    # en conflit de site.
+    from outils_lieux_noms import _referentiel_personnes, _resoudre
+    ref = _referentiel_personnes(sujet=sujet)
+
+    def initiales_de(ligne):
+        dernier = str(_cellule(ligne, i["Clé"]) or "").split("|")[-1].strip()
+        if dernier in ref["personnes"]:
+            return dernier
+        return _resoudre(_cellule(ligne, i["Collaborateur"]), ref)[0]
 
     jour_meme = _aujourdhui()
     sites_par_personne = {}
@@ -1021,7 +1037,9 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             continue
         if fin and fin < jour_meme:
             continue
-        personne = _normaliser(_cellule(ligne, i["Collaborateur"]))
+        personne = initiales_de(ligne)
+        if not personne:
+            continue
         site = site_par_batiment.get(_normaliser(_cellule(ligne, i["Bâtiment"])), "")
         if not site:
             continue
@@ -1036,12 +1054,14 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             if len(sites) == 1:
                 par_personne.setdefault(personne, {})[creneau] = next(iter(sites))
             else:
-                conflits.append({"collaborateur": personne.title(), "creneau": creneau.lower(),
+                conflits.append({"collaborateur": ref["personnes"][personne]["nom_usage"],
+                                 "initiales": personne, "creneau": creneau.lower(),
                                  "sites": sorted(sites)})
 
     effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
     tetes = effectif[0]
     i_nom = _colonne(tetes, "Nom prénom")
+    i_ini = _colonne(tetes, "Initiales")
     try:
         i_etat = _colonne(tetes, "État de l'engagement")
     except RuntimeError:
@@ -1062,7 +1082,7 @@ def lieux_renvoyer_vers_effectif(confirmer: bool = False, sujet: str = ""):
             continue
         if i_etat is not None and _cellule(ligne, i_etat) not in ETATS_ENGAGEMENT_VIVANTS:
             continue
-        connus = par_personne.get(_normaliser(nom))
+        connus = par_personne.get(str(_cellule(ligne, i_ini)).strip())
         if not connus:
             continue
         for intitule, colonne in creneaux:

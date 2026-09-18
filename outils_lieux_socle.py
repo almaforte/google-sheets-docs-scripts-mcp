@@ -440,16 +440,30 @@ def _table_referentiel(sujet: str = ""):
     return par_batiment, par_identifiant
 
 
-def _vocabulaire(sujet: str = ""):
-    """Collaborateurs connus et types d'occupation non nominatifs."""
+def _vocabulaire(sujet: str = "", ref=None):
+    """Collaborateurs connus et types d'occupation non nominatifs.
+
+    Depuis le 18.09.2026 les collaborateurs viennent de la table unique de
+    resolution (outils_lieux_noms, lue dans Registre - Personnes) : toute
+    graphie connue, nom d'usage, nom complet, nom anterieur ou initiales,
+    rend le nom d'usage. L'onglet Listes ne sert plus qu'aux types
+    d'occupation, aux menus et aux couleurs. Si la table est illisible,
+    la colonne Collaborateur de Listes tient lieu de filet.
+    """
     listes = _lire(ONGLET_LISTES, sujet=sujet)
     tetes = listes[0]
     i_type = _colonne(tetes, "Type d'occupation")
     collaborateurs = {}
-    for ligne in listes[1:]:
-        nom = _cellule(ligne, 0)
-        if nom:
-            collaborateurs[_normaliser(nom)] = nom
+    try:
+        from outils_lieux_noms import _referentiel_personnes, _vocabulaire_personnes
+        collaborateurs = _vocabulaire_personnes(ref or _referentiel_personnes(sujet=sujet))
+    except Exception as erreur:  # noqa: BLE001
+        print("[lieux socle] table des personnes illisible, repli sur Listes : " + str(erreur)[:200], flush=True)
+    if not collaborateurs:
+        for ligne in listes[1:]:
+            nom = _cellule(ligne, 0)
+            if nom:
+                collaborateurs[_normaliser(nom)] = nom
     types = {}
     for ligne in listes[1:]:
         valeur = _cellule(ligne, i_type)
@@ -591,6 +605,17 @@ def _teletravail_au(date_iso: str, sujet: str = ""):
         i_fin = _colonne(tetes, "Date de fin")
     except RuntimeError:
         i_debut = i_fin = None
+    try:
+        i_ini = _colonne(tetes, "Initiales")
+    except RuntimeError:
+        i_ini = None
+    # La bande HOME OFFICE affiche le nom d'usage (18.09.2026).
+    affichage = {}
+    try:
+        from outils_lieux_noms import _referentiel_personnes
+        affichage = {ini: p["nom_usage"] for ini, p in _referentiel_personnes(sujet=sujet)["personnes"].items()}
+    except Exception as erreur:  # noqa: BLE001
+        print("[lieux socle] noms d'usage illisibles pour le télétravail : " + str(erreur)[:200], flush=True)
     creneaux = []
     for jour in JOURS:
         for demi in DEMIS:
@@ -603,6 +628,8 @@ def _teletravail_au(date_iso: str, sujet: str = ""):
         nom = str(_cellule(ligne, i_nom)).strip()
         if not nom:
             continue
+        if i_ini is not None:
+            nom = affichage.get(str(_cellule(ligne, i_ini)).strip(), nom)
         if i_etat is not None and _cellule(ligne, i_etat) not in ETATS_ENGAGEMENT_VIVANTS:
             continue
         if i_debut is not None:
@@ -763,7 +790,18 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
     """Rend la liste des occupations lues dans la grille, plus les anomalies."""
     grille = _lire(onglet, sujet=sujet)
     par_batiment, _ = _table_referentiel(sujet=sujet)
-    collaborateurs, types = _vocabulaire(sujet=sujet)
+    # La table unique des personnes donne le nom d'usage a afficher et les
+    # initiales qui entrent dans la cle (18.09.2026) ; sans elle, le nom
+    # affiche tient lieu d'identifiant, comme avant.
+    ref, index = None, {}
+    try:
+        from outils_lieux_noms import _referentiel_personnes, _suggestion
+        ref = _referentiel_personnes(sujet=sujet)
+        index = ref["index"]
+    except Exception as erreur:  # noqa: BLE001
+        print("[lieux socle] table des personnes illisible : " + str(erreur)[:200], flush=True)
+        _suggestion = None
+    collaborateurs, types = _vocabulaire(sujet=sujet, ref=ref)
 
     occupations, anomalies = [], []
     for bloc in _blocs(grille):
@@ -792,15 +830,19 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
 
                 fiche = bureaux_du_site.get(_normaliser_bureau(nom_bureau))
                 cle = _normaliser(occupant)
+                initiales = ""
                 if cle in collaborateurs:
                     nature, personne = "Collaborateur", collaborateurs[cle]
+                    initiales = index.get(cle, "")
                 elif cle in types:
                     nature, personne = types[cle], types[cle]
                 else:
                     nature, personne = "À vérifier", occupant
+                    proche = _suggestion(occupant, ref) if (ref and _suggestion) else ""
                     anomalies.append([
                         "Occupant inconnu du registre Effectif", occupant,
                         bloc["site"] + " / " + nom_bureau + " / " + jour + " " + demi,
+                        ("suggestion : " + proche) if proche else "",
                     ])
 
                 occupations.append({
@@ -811,6 +853,7 @@ def _lire_la_grille(onglet=ONGLET_GRILLE, sujet: str = ""):
                     "jour": jour,
                     "demi": demi,
                     "occupant": personne,
+                    "initiales": initiales,
                     "nature": nature,
                     "ligne": r,
                     "colonne": colonne,

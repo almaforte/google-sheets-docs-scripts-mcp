@@ -366,6 +366,18 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
         i_cle = _colonne(tetes, "Clé engagement")
     except RuntimeError:
         i_cle = None
+    # La vue affiche le nom d'usage (18.09.2026) ; le nom complet reste
+    # dans la fiche pour retrouver les postes declares sous ce nom.
+    try:
+        i_ini = _colonne(tetes, "Initiales")
+    except RuntimeError:
+        i_ini = None
+    affichage = {}
+    try:
+        from outils_lieux_noms import _referentiel_personnes
+        affichage = {ini: p["nom_usage"] for ini, p in _referentiel_personnes(sujet=sujet)["personnes"].items()}
+    except Exception as erreur:  # noqa: BLE001
+        print("[lieux admin] noms d'usage illisibles : " + str(erreur)[:200], flush=True)
     try:
         i_profession = _colonne(tetes, "Profession")
     except RuntimeError:
@@ -394,9 +406,12 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
 
     par_etat = {}
     for ligne in effectif[1:]:
-        nom = str(_cellule(ligne, i_nom)).strip()
-        if not nom:
+        nom_complet = str(_cellule(ligne, i_nom)).strip()
+        if not nom_complet:
             continue
+        nom = nom_complet
+        if i_ini is not None:
+            nom = affichage.get(str(_cellule(ligne, i_ini)).strip(), nom_complet)
         etat = _cellule(ligne, i_etat) if i_etat is not None else ETATS_ENGAGEMENT_VIVANTS[0]
         if etat not in ETATS_ENGAGEMENT_VIVANTS:
             continue
@@ -416,7 +431,8 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
         if ept_admin <= 0 and not postes:
             continue
         fiche = par_etat.setdefault(_normaliser(nom), {}).setdefault(etat, {
-            "nom": nom, "cle": "", "ept_admin": 0.0, "postes": {}, "profession": "", "presences": {},
+            "nom": nom, "nom_complet": nom_complet, "cle": "", "ept_admin": 0.0, "postes": {},
+            "profession": "", "presences": {},
         })
         fiche["ept_admin"] += ept_admin
         if not fiche["cle"] and i_cle is not None:
@@ -499,6 +515,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         place = apparition.get(("cle", cle)) if cle else None
         if place is None:
             place = apparition.get(("nom", _normaliser(nom)))
+        if place is None and fiche.get("nom_complet"):
+            place = apparition.get(("nom", _normaliser(fiche["nom_complet"])))
         if place is not None:
             return (0, place, 0, "")
         service = _cle_service(service_de(fiche))
@@ -511,6 +529,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         fiche = fiches[nom]
         declare = list(declares_cle.get(_normaliser(fiche["cle"]), [])) if fiche["cle"] else []
         declare += declares_nom.get(_normaliser(nom), [])
+        if fiche.get("nom_complet") and _normaliser(fiche["nom_complet"]) != _normaliser(nom):
+            declare += declares_nom.get(_normaliser(fiche["nom_complet"]), [])
         if declare:
             cahier = [(d, s, p, round(float(t or 0.0), 3)) for d, s, p, t in declare]
         else:

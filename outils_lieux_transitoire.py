@@ -157,18 +157,20 @@ def _fins_registre_rh(sujet: str = ""):
     fin, la personne reste et la valeur est vide ; sinon la plus tardive.
     Une personne dont tous les engagements sont clos garde la fin la plus
     tardive, ce qui clot ses attributions oubliees. Rend
-    ({nom normalise: date ISO ou ""}, noms connus).
+    ({initiales: date ISO ou ""}, initiales connues). Les personnes se
+    reconnaissent par leurs initiales depuis le 18.09.2026, plus jamais
+    par la graphie de leur nom.
     """
     effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
     if not effectif:
         return {}, set()
     tetes = effectif[0]
-    i_nom = _colonne(tetes, "Nom prénom")
+    i_nom = _colonne(tetes, "Initiales")
     i_etat = _colonne(tetes, "État de l'engagement")
     i_fin = _colonne(tetes, "Date de fin")
     vivants, clos = {}, {}
     for ligne in effectif[1:]:
-        nom = _normaliser(_cellule(ligne, i_nom))
+        nom = str(_cellule(ligne, i_nom) or "").strip()
         if not nom:
             continue
         fin = _date_serie(_cellule(ligne, i_fin))
@@ -185,19 +187,38 @@ def _fins_registre_rh(sujet: str = ""):
     return fins, set(vivants) | set(clos)
 
 
-def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme):
+def _meme_personne(segment: str, initiales: str, occupant: str, ref) -> bool:
+    """Vrai si le dernier segment d'une cle lue designe la meme personne
+    (ou la meme valeur generique) que le contenu de la ligne : une cle
+    ecrite avant le 18.09.2026 avec le nom, ou avec une ancienne graphie,
+    n'est pas une retouche manuelle, c'est un changement de forme."""
+    seg = str(segment or "").strip()
+    if initiales:
+        if seg == initiales:
+            return True
+        return bool(ref) and ref["index"].get(_normaliser(seg)) == initiales
+    return _normaliser(seg) == _normaliser(occupant)
+
+
+def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme, ref=None):
     """Met chaque ligne en ordre sans rien decider a la place d'une personne.
 
-    Identifiant du bureau retrouve depuis le batiment et le bureau ; cle
-    recalculee ; origine Main pour une ligne sans cle ou dont la cle ne
-    correspond plus a son contenu, avec « Registre seul » dans la
+    Identifiant du bureau retrouve depuis le batiment et le bureau ;
+    occupant resolu par la table unique des personnes (18.09.2026) : le
+    nom d'usage s'ecrit dans Collaborateur, les initiales entrent dans
+    la cle ; cle recalculee ; origine Main pour une ligne sans cle ou
+    dont la cle ne correspond plus a son contenu (un simple changement de
+    forme de la cle n'en est pas un), avec « Registre seul » dans la
     remarque ; date de fin du registre RH quand Date de fin est vide ou
     porte encore ce que le moteur y avait mis ; statut selon les dates,
-    Confirmée gardee. Rend (lignes, retouches, anomalies).
+    Confirmée gardee. Rend (lignes, retouches, anomalies, inconnus), les
+    inconnus etant {graphie: suggestion ou ""}.
     """
+    from outils_lieux_noms import _resoudre, _suggestion
     i = {nom: _colonne(entetes, nom) for nom in COLONNES}
     largeur = len(entetes)
-    sortie, retouches, anomalies = [], 0, []
+    sortie, retouches, anomalies, inconnus = [], 0, [], {}
+    _, types = _vocabulaire(ref=ref) if ref else ({}, {})
     for ligne in lignes:
         l = list(ligne)[:largeur] + [""] * (largeur - len(ligne))
         occupant = str(_cellule(l, i["Collaborateur"])).strip()
@@ -221,13 +242,35 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme):
             identifiant = ""
         elif not identifiant:
             anomalies.append(["Bureau inconnu du référentiel", occupant, batiment + " / " + bureau])
-        cle = "|".join([identifiant or ("MENAGE:" + batiment), jour, demi, occupant])
+
+        # Resolution de l'occupant : personne (initiales, nom d'usage),
+        # valeur generique, ou graphie inconnue laissee telle quelle.
+        initiales, affichage = ("", occupant)
+        if ref and occupant:
+            initiales, affichage = _resoudre(occupant, ref)
+            if initiales:
+                if affichage != occupant:
+                    l[i["Collaborateur"]] = affichage
+                    retouches += 1
+                occupant = affichage
+            elif _normaliser(occupant) in types:
+                occupant = types[_normaliser(occupant)]
+                l[i["Collaborateur"]] = occupant
+            else:
+                inconnus.setdefault(occupant, _suggestion(occupant, ref))
+        if not occupant:
+            anomalies.append(["Attribution sans occupant", cle_lue, batiment + " / " + bureau + " / " + jour + " " + demi])
+        cle = "|".join([identifiant or ("MENAGE:" + batiment), jour, demi, initiales or occupant])
         origine = ORIGINE_MAIN if MARQUE_MAIN.upper() in _normaliser(remarque) else \
             (str(_cellule(l, i["Origine"])).strip() or ORIGINE_GRILLE)
         if cle_lue != cle:
+            tete_lue = cle_lue.rsplit("|", 1)
+            meme_forme = (len(tete_lue) == 2 and tete_lue[0] == cle.rsplit("|", 1)[0]
+                          and _meme_personne(tete_lue[1], initiales, occupant, ref))
             l[i["Clé"]] = cle
-            origine = ORIGINE_MAIN
-            retouches += 1
+            if not meme_forme:
+                origine = ORIGINE_MAIN
+                retouches += 1
         if origine == ORIGINE_MAIN and MARQUE_MAIN.upper() not in _normaliser(remarque):
             remarque = ", ".join(x for x in [remarque, MARQUE_MAIN] if x)
             l[i["Remarque"]] = remarque
@@ -238,7 +281,7 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme):
         debut = _date_serie(debut_brut)
         fin = _date_serie(fin_brut)
         fin_rh_avant = _date_serie(_cellule(l, i["Fin selon registre RH"]))
-        fin_rh = fins_rh.get(_normaliser(occupant))
+        fin_rh = fins_rh.get(initiales) if initiales else None
         if fin_rh is not None:
             # La date de fin appartient au moteur tant qu'elle est vide ou
             # qu'elle porte encore ce que le registre RH disait la
@@ -265,7 +308,7 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme):
                 l[i["Statut"]] = nouveau
                 retouches += 1
         sortie.append(l)
-    return sortie, retouches, anomalies
+    return sortie, retouches, anomalies, inconnus
 
 
 @mcp.tool()
@@ -282,26 +325,30 @@ def lieux_consolider_attributions(sujet: str = ""):
     personne ne l'a ecrite, statut selon les dates. Une date de fin
     ecrite a la main n'est jamais reprise. Idempotent, sans confirmation.
     """
+    from outils_lieux_noms import _referentiel_personnes
     entetes = _entetes(sujet=sujet)
     existantes = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)[1:]
     fins_rh, connus = _fins_registre_rh(sujet=sujet)
     par_batiment, _ = _table_referentiel(sujet=sujet)
-    lignes, retouches, anomalies = _consolider_lignes(existantes, entetes, fins_rh, par_batiment, _aujourdhui())
-    i_nom = _colonne(entetes, "Collaborateur")
-    _, types = _vocabulaire(sujet=sujet)
-    inconnus = sorted({_cellule(l, i_nom) for l in lignes
-                       if _normaliser(_cellule(l, i_nom)) not in connus
-                       and _normaliser(_cellule(l, i_nom)) not in types})
+    ref = _referentiel_personnes(sujet=sujet)
+    lignes, retouches, anomalies, inconnus = _consolider_lignes(
+        existantes, entetes, fins_rh, par_batiment, _aujourdhui(), ref=ref)
     _ecrire_registre_large(lignes, entetes, sujet=sujet)
     horodatage = _maintenant()
     journal = [[horodatage, "Attributions", "Consolidation", "Registre", str(len(existantes)), str(len(lignes)),
                 "Terminé", "retouches " + str(retouches) + ", noms hors effectif " + str(len(inconnus))]]
     for a in anomalies[:40]:
         journal.append([horodatage, "Attributions", "Anomalie", a[1], "", a[2], "À vérifier", a[0]])
+    for graphie, proche in sorted(inconnus.items())[:40]:
+        journal.append([horodatage, "Attributions", "Nom hors effectif", graphie, "", proche, "À vérifier",
+                        "graphie inconnue de Registre - Personnes" + (", suggestion : " + proche if proche else "")])
     _journaliser(journal, sujet=sujet)
     fins_posees = sum(1 for l in lignes if _cellule(l, _colonne(entetes, "Fin selon registre RH")))
     return {"attributions": len(lignes), "retouches": retouches, "fins_du_registre_rh": fins_posees,
-            "noms_hors_effectif": inconnus[:40], "anomalies": anomalies[:40]}
+            "noms_hors_effectif": sorted(inconnus)[:40],
+            "suggestions": {g: p for g, p in sorted(inconnus.items()) if p},
+            "doublons_de_graphie": ref["doublons"][:20],
+            "anomalies": anomalies[:40]}
 
 
 # --------------------------------------------------- charte d'Attributions
@@ -674,6 +721,13 @@ def lieux_passage_quotidien(sujet: str = ""):
     Engagements. Lance chaque matin par la tache planifiee
     « Almaval - Lieux - Passage quotidien ».
     """
+    # La liste des occupants (noms d'usage, initiales, couleurs) est
+    # reposee avant tout, depuis Registre - Personnes (18.09.2026).
+    try:
+        from outils_lieux_noms import lieux_poser_listes_occupants
+        listes = lieux_poser_listes_occupants(sujet=sujet)
+    except Exception as exc:  # noqa: BLE001
+        listes = {"erreur": type(exc).__name__, "detail": str(exc)[:300]}
     consolidation = lieux_consolider_attributions(sujet=sujet)
     charte = lieux_charte_attributions(sujet=sujet)
     vue = lieux_vue_du_jour(sujet=sujet)
@@ -682,7 +736,7 @@ def lieux_passage_quotidien(sujet: str = ""):
     patients = lieux_publier_vers_patients(confirmer=True, sujet=sujet)
     effectif = lieux_renvoyer_vers_effectif(confirmer=True, sujet=sujet)
     organigramme = lieux_publier_organigramme_patients(sujet=sujet)
-    return {"consolidation": consolidation, "charte_attributions": charte, "vue_actuelle": vue,
+    return {"listes_occupants": listes, "consolidation": consolidation, "charte_attributions": charte, "vue_actuelle": vue,
             "planification": planification, "colonnes_ajustees": colonnes,
             "publication_patients": patients, "retour_effectif": effectif,
             "organigramme_patients": organigramme}
@@ -717,7 +771,7 @@ def lieux_cycle(sujet: str = ""):
     agendas et la Planification. Un sujet qui contient « construire »
     aplatit d'abord la grille, comme avant. « action:nom clef=valeur »
     route vers un autre outil : consolider, quotidien, vue_jour,
-    charte_attributions, organigramme, et tous ceux d'outils_lieux.
+    charte_attributions, et tous ceux d'outils_lieux.
     """
     texte = str(sujet or "")
     if texte.startswith("action:"):
