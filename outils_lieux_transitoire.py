@@ -253,6 +253,16 @@ def _consolider_lignes(lignes, entetes, fins_rh, par_batiment, jour_meme, ref=No
                     l[i["Collaborateur"]] = affichage
                     retouches += 1
                 occupant = affichage
+                # Le doute pose par un ancien passage (« Nom inconnu du
+                # registre Effectif ») tombe des que la personne est
+                # reconnue : sinon la ligne garderait son point
+                # d'interrogation dans les vues et son statut Proposée.
+                if "NOM INCONNU" in _normaliser(remarque):
+                    morceaux = [m.strip() for m in remarque.split(",")
+                                if m.strip() and "NOM INCONNU" not in _normaliser(m)]
+                    remarque = ", ".join(morceaux)
+                    l[i["Remarque"]] = remarque
+                    retouches += 1
             elif _normaliser(occupant) in types:
                 occupant = types[_normaliser(occupant)]
                 l[i["Collaborateur"]] = occupant
@@ -771,7 +781,7 @@ def lieux_cycle(sujet: str = ""):
     agendas et la Planification. Un sujet qui contient « construire »
     aplatit d'abord la grille, comme avant. « action:nom clef=valeur »
     route vers un autre outil : consolider, quotidien, vue_jour,
-    charte_attributions, et tous ceux d'outils_lieux.
+    charte_attributions, organigramme, et tous ceux d'outils_lieux.
     """
     texte = str(sujet or "")
     if texte.startswith("action:"):
