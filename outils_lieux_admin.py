@@ -64,10 +64,15 @@ n'a donc plus de nom a forcer a une place.
 Sous son nom, la ligne « Cahier des charges » sur sa propre couleur,
 puis les postes, separes par un filet horizontal tirete, sans filet
 vertical entre Departement, Service, Poste et Taux ; puis le total.
-Dans la grille, le mot « Présent » sur chaque demi-journee tenue dans
-un lieu de la maison, aux couleurs de la personne, « Télétravail » en
-gris quand elle travaille de chez elle, chaque mot fondu sur la journee
-entiere comme un nom dans les autres vues. Tout est ecrit par le
+Dans la grille, chaque demi-journee travaillee porte un mot qui dit
+aussi ou la personne est (Alberto, 19.09.2026) : « Présent à Morges »
+pour un site de la maison, aux couleurs de la personne, « Présent en
+télétravail » en gris quand elle travaille de chez elle, « Présent en
+itinérance » quand elle travaille sans bureau attitre, en bougeant
+entre les locaux tout en restant joignable. Le mot est fondu sur la
+journee entiere quand les deux demi-journees se ressemblent, et se
+separe sinon : une matinee a Crissier et une apres-midi a Morges ne se
+confondent plus. Tout est ecrit par le
 moteur, rien ne se saisit ici : l'onglet est protege, et la nomenclature
 se corrige dans Registre - Postes admin (Service, Poste, Taux ; jamais
 Departement, qui se calcule).
@@ -149,6 +154,22 @@ SITE_ADMIN_TECHNIQUE = "ADMIN"
 MOT_PRESENT = "Présent"
 MOT_TELETRAVAIL = "Télétravail"
 NON_TRAVAILLE = "Non travaillé"
+MOT_ITINERANT = "Itinérant"
+# Decision d'Alberto du 19.09.2026 : la ligne de presence dit aussi ou.
+# Une demi-journee travaillee sans bureau attitre est de l'itinerance,
+# la personne bouge entre les locaux et reste joignable ; le teletravail
+# reste distinct, c'est de l'attitre a distance. Les valeurs de gauche
+# sont celles de la liste « Lieu de travail » du registre RH ; tout ce
+# qui n'y figure pas est un site et prend la forme « Présent à <site> ».
+LIBELLES_PRESENCE = {
+    MOT_TELETRAVAIL: "Présent en télétravail",
+    MOT_ITINERANT: "Présent en itinérance",
+    "Formation": "Présent en formation",
+    "Déplacement": "Présent en déplacement",
+    "Jura": "Présent au Jura",
+}
+# La regle de mise en forme cherche ce fragment, pas le libelle entier.
+MARQUE_TELETRAVAIL = "télétravail"
 A_REPARTIR = "À répartir"
 ROSE = "#f4cccc"
 LIBELLE_CAHIER = "Cahier des charges"
@@ -391,6 +412,10 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
         i_fin = _colonne(tetes, "Date de fin")
     except RuntimeError:
         i_debut = i_fin = None
+    try:
+        i_total = _colonne(tetes, "EPT total")
+    except RuntimeError:
+        i_total = None
     colonnes_services = []
     for k, tete in enumerate(tetes):
         texte = str(tete or "").strip()
@@ -432,9 +457,11 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
             continue
         fiche = par_etat.setdefault(_normaliser(nom), {}).setdefault(etat, {
             "nom": nom, "nom_complet": nom_complet, "cle": "", "ept_admin": 0.0, "postes": {},
-            "profession": "", "presences": {},
+            "profession": "", "presences": {}, "ept_total": 0.0,
         })
         fiche["ept_admin"] += ept_admin
+        if i_total is not None:
+            fiche["ept_total"] += _nombre(_cellule(ligne, i_total)) or 0.0
         if not fiche["cle"] and i_cle is not None:
             fiche["cle"] = str(_cellule(ligne, i_cle)).strip()
         for service, valeur in postes.items():
@@ -461,7 +488,17 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
 # ------------------------------------------------------------------- grille
 
 def _mot(lieu: str) -> str:
-    return MOT_TELETRAVAIL if _normaliser(lieu) == _normaliser(MOT_TELETRAVAIL) else MOT_PRESENT
+    """Le mot de la case de presence, qui dit aussi ou la personne est.
+
+    Un lieu inconnu de LIBELLES_PRESENCE est tenu pour un site et prend
+    la forme « Présent à <site> » : mieux vaut un libelle inhabituel
+    qu'une case vide, la vue etant d'abord un temoin de presence.
+    """
+    cle = _normaliser(lieu)
+    for valeur, libelle in LIBELLES_PRESENCE.items():
+        if cle == _normaliser(valeur):
+            return libelle
+    return MOT_PRESENT + " à " + str(lieu).strip()
 
 
 def _grille_admin(date_iso: str, sujet: str = ""):
@@ -596,6 +633,17 @@ def _grille_admin(date_iso: str, sujet: str = ""):
             ecarts.append({"collaborateur": nom, "postes": round(somme - a_repartir[nom], 3),
                            "ept_admin": ept_admin, "a_repartir": a_repartir[nom],
                            "lecture": "une part de l'EPT administratif n'est portée par aucun service"})
+        # Troisieme controle, demande par Alberto le 19.09.2026 : la
+        # presence declaree doit tenir dans l'EPT total, dix demi-journees
+        # pour un plein temps. Une semaine qui deborde peut etre un samedi
+        # travaille, l'ecart se lit, il ne se corrige pas tout seul.
+        ept_total = round(fiches[nom].get("ept_total") or 0.0, 3)
+        attendues = int(round(ept_total * 10))
+        declarees = len(fiches[nom]["presences"])
+        if attendues and declarees != attendues:
+            ecarts.append({"collaborateur": nom, "demi_journees_declarees": declarees,
+                           "demi_journees_attendues": attendues, "ept_total": ept_total,
+                           "lecture": "la présence déclarée ne correspond pas à l'EPT total"})
     grille.append(total)
     r_jours = len(grille)
 
@@ -802,7 +850,7 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             "ranges": [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
                         "startColumnIndex": c, "endColumnIndex": c + 4}],
             "booleanRule": {
-                "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": MOT_PRESENT}]},
+                "condition": {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": MOT_PRESENT}]},
                 "format": {"backgroundColor": _rvb(couleur)}},
         }, "index": 0}})
     if n:
@@ -810,7 +858,7 @@ def _charte_admin(sid: int, grille, meta, couleurs):
             "ranges": [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
                         "startColumnIndex": 2, "endColumnIndex": meta["largeur"]}],
             "booleanRule": {
-                "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": MOT_TELETRAVAIL}]},
+                "condition": {"type": "TEXT_CONTAINS", "values": [{"userEnteredValue": MARQUE_TELETRAVAIL}]},
                 "format": {"textFormat": {"italic": True, "foregroundColor": _rvb(GRIS)}}},
         }, "index": 0}})
 
