@@ -195,6 +195,13 @@ FILET_POSTES = "DASHED"
 # dupliquer a la main une regle fixe du schema de gouvernance.
 ONGLET_POSTES = "Registre - Postes admin"
 COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Service", "Poste", "Taux")
+# Le referentiel des postes recopie dans l'Effectif : quand une ligne du
+# cahier des charges porte un sous-service (ADC, Communication...), la
+# vue montre l'intitule abrege du referentiel a la place du poste nu,
+# « ADC - Ch. projet » plutot que « Chargé de projet » (Alberto,
+# 19.09.2026) ; sans sous-service, le poste nu suffit, le service etant
+# deja dans sa colonne.
+ONGLET_POSTES_REFERENTIEL = "Aide - Postes référentiel"
 # Les services du registre qui ne font pas un poste a part : la part de
 # direction est inherente aux roles des poles de la direction generale.
 SERVICES_INTEGRES = ("Direction",)
@@ -261,6 +268,43 @@ EPT_TECHNIQUES = {
 
 
 # ------------------------------------------------------------------ lecture
+
+def _lire_brut(onglet: str, classeur: str, sujet: str = ""):
+    """Comme _lire, mais en valeurs non formatees : un taux de 0,028
+    affiche a deux decimales se lisait 0,03 et faussait le total du
+    cahier des charges (Alberto, 19.09.2026). Les dates reviennent en
+    numero de serie, que _date_serie sait lire."""
+    reponse = _feuilles(sujet).values().get(
+        spreadsheetId=classeur, range="'" + onglet + "'", valueRenderOption="UNFORMATTED_VALUE"
+    ).execute()
+    return reponse.get("values", [])
+
+
+def _abreges_postes(sujet: str = ""):
+    """{(service, sous-service, poste) normalises: intitule abrege}, lu
+    dans le referentiel des postes ; vide si l'onglet manque."""
+    try:
+        lignes = _lire(ONGLET_POSTES_REFERENTIEL, ID_EFFECTIF, sujet=sujet)
+    except Exception:  # noqa: BLE001
+        return {}
+    if not lignes:
+        return {}
+    tetes = lignes[0]
+    try:
+        i_service = _colonne(tetes, "Service")
+        i_sous = _colonne(tetes, "Sous-service")
+        i_poste = _colonne(tetes, "Poste")
+        i_abrege = _colonne(tetes, "Intitulé EPT abrégé")
+    except RuntimeError:
+        return {}
+    abreges = {}
+    for ligne in lignes[1:]:
+        abrege = str(_cellule(ligne, i_abrege)).strip()
+        if abrege:
+            abreges[(_normaliser(_cellule(ligne, i_service)), _normaliser(_cellule(ligne, i_sous)),
+                     _normaliser(_cellule(ligne, i_poste)))] = abrege
+    return abreges
+
 
 def _nombre(valeur):
     """Un nombre lu dans une cellule affichee en francais, ou None."""
@@ -331,7 +375,7 @@ def _postes_declares(sujet: str = ""):
     service (SERVICES_VERS_DEPARTEMENT), jamais lu dans le registre. Sans
     l'onglet, la vue se fait avec les services du registre."""
     try:
-        lignes = _lire(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
+        lignes = _lire_brut(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
         return {}, {}, {}
     if not lignes:
@@ -351,6 +395,11 @@ def _postes_declares(sujet: str = ""):
         i_nom = _colonne(tetes, "Nom prénom")
     except RuntimeError:
         i_nom = None
+    try:
+        i_sous = _colonne(tetes, "Sous-service")
+    except RuntimeError:
+        i_sous = None
+    abreges = _abreges_postes(sujet=sujet) if i_sous is not None else {}
     par_cle, par_nom, apparition = {}, {}, {}
     for ligne in lignes[1:]:
         service = str(_cellule(ligne, i_service)).strip()
@@ -358,6 +407,10 @@ def _postes_declares(sujet: str = ""):
         taux = _nombre(_cellule(ligne, i_taux))
         if not poste and not service:
             continue
+        sous = str(_cellule(ligne, i_sous)).strip() if i_sous is not None else ""
+        if sous:
+            poste = abreges.get((_normaliser(service), _normaliser(sous), _normaliser(poste)),
+                                poste + " " + sous)
         departement = _departement_du_service(service)
         entree = (departement, service, poste, taux if taux is not None else 0.0)
         cle = _normaliser(_cellule(ligne, i_cle)) if i_cle is not None else ""
@@ -378,7 +431,7 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
     chaque demi-journee (le lieu). Engagements vivants a la date ; En cours
     prime sur À venir ; deux engagements du meme etat s'additionnent.
     Rend {nom: fiche}."""
-    effectif = _lire(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
+    effectif = _lire_brut(ONGLET_EFFECTIF, ID_EFFECTIF, sujet=sujet)
     if not effectif:
         return {}
     tetes = effectif[0]
