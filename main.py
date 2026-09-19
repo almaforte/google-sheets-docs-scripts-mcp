@@ -578,21 +578,57 @@ def create_spreadsheet(
     title: str,
     folder_id: str = "",
     sheet_titles: Optional[list] = None,
+    locale: str = "",
+    time_zone: str = "Europe/Zurich",
 ) -> Any:
     """Crée un nouveau classeur et retourne son identifiant et son lien.
 
     folder_id    : dossier Drive de destination, facultatif
     sheet_titles : titres des onglets à créer, facultatif
+    locale       : langue du classeur, par exemple fr_FR. Vide par défaut :
+                   le classeur prend alors la langue du compte qui le crée,
+                   ce qui est le comportement voulu dans la maison.
+    time_zone    : fuseau du classeur, Europe/Zurich par défaut.
+
+    19.09.2026. La langue fr_CH était écrite en dur ici, et l'API Sheets la
+    refuse : « Invalid properties: Unsupported locale: fr_CH ». Toute
+    création de classeur échouait donc, sur toutes les boîtes, ce qui est
+    passé inaperçu tant que personne n'en créait par cette porte. Constaté
+    en voulant créer un classeur d'essai. La langue n'est désormais plus
+    imposée, et si une langue explicite est refusée, la création est
+    retentée sans elle plutôt que d'échouer.
     """
-    body: dict = {"properties": {"title": title, "locale": "fr_CH"}}
+    proprietes: dict = {"title": title}
+    if locale:
+        proprietes["locale"] = locale
+    if time_zone:
+        proprietes["timeZone"] = time_zone
+    body: dict = {"properties": proprietes}
     if sheet_titles:
         body["sheets"] = [{"properties": {"title": t}} for t in sheet_titles]
-    created = (
-        _sheets()
-        .spreadsheets()
-        .create(body=body, fields="spreadsheetId,spreadsheetUrl")
-        .execute()
-    )
+
+    def _creer(corps: dict) -> Any:
+        return (
+            _sheets()
+            .spreadsheets()
+            .create(body=corps, fields="spreadsheetId,spreadsheetUrl")
+            .execute()
+        )
+
+    try:
+        created = _creer(body)
+    except HttpError as exc:
+        message = str(exc)
+        if "locale" not in message.lower():
+            raise
+        proprietes.pop("locale", None)
+        try:
+            created = _creer({**body, "properties": proprietes})
+        except HttpError as exc2:
+            if "time zone" not in str(exc2).lower() and "timezone" not in str(exc2).lower():
+                raise
+            proprietes.pop("timeZone", None)
+            created = _creer({**body, "properties": proprietes})
     file_id = created["spreadsheetId"]
     if folder_id:
         current = (
