@@ -67,7 +67,8 @@ vertical entre Departement, Service, Poste et Taux ; puis le total.
 Dans la grille, chaque demi-journee travaillee porte un mot qui dit
 aussi ou la personne est (Alberto, 19.09.2026) : « Présent à Morges »
 pour un site de la maison, aux couleurs de la personne, « Présent en
-télétravail » en gris quand elle travaille de chez elle, « Présent en
+télétravail » en italique gris sur ces memes couleurs eclaircies quand
+elle travaille de chez elle, jamais sur fond blanc, « Présent en
 itinérance » quand elle travaille sans bureau attitre, en bougeant
 entre les locaux tout en restant joignable. Le mot est fondu sur la
 journee entiere quand les deux demi-journees se ressemblent, et se
@@ -487,6 +488,13 @@ def _engagements_admin(date_iso: str, sujet: str = ""):
 
 # ------------------------------------------------------------------- grille
 
+def _eclairci(hexa: str, part: float = 0.5) -> str:
+    """La meme couleur, melangee a du blanc pour la part donnee."""
+    hexa = hexa.lstrip("#")
+    canaux = [int(hexa[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join("%02x" % round(v + (255 - v) * part) for v in canaux)
+
+
 def _mot(lieu: str) -> str:
     """Le mot de la case de presence, qui dit aussi ou la personne est.
 
@@ -840,26 +848,30 @@ def _charte_admin(sid: int, grille, meta, couleurs):
         c = 2 + 4 * k
         requetes.append(bords(meta["r_entete"], r_fin, c, c + 1, left=filet))
 
-    # « Présent » aux couleurs de la personne, « Télétravail » en gris
+    # « Présent » aux couleurs de la personne. Le teletravail garde ces
+    # couleurs, eclaircies de moitie, avec le texte en italique gris :
+    # jamais un fond blanc, qui est reserve au provisoire (Alberto,
+    # 19.09.2026). Sheets n'applique que la premiere regle vraie, donc
+    # la regle du teletravail est inseree devant celle de la presence.
     for k, nom in enumerate(meta["personnes"]):
         couleur = couleurs.get(nom)
         if not couleur:
             continue
         c = 2 + 4 * k
+        plage = [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
+                  "startColumnIndex": c, "endColumnIndex": c + 4}]
         requetes.append({"addConditionalFormatRule": {"rule": {
-            "ranges": [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
-                        "startColumnIndex": c, "endColumnIndex": c + 4}],
+            "ranges": plage,
             "booleanRule": {
                 "condition": {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": MOT_PRESENT}]},
                 "format": {"backgroundColor": _rvb(couleur)}},
         }, "index": 0}})
-    if n:
         requetes.append({"addConditionalFormatRule": {"rule": {
-            "ranges": [{"sheetId": sid, "startRowIndex": meta["r_jours"], "endRowIndex": r_fin,
-                        "startColumnIndex": 2, "endColumnIndex": meta["largeur"]}],
+            "ranges": plage,
             "booleanRule": {
                 "condition": {"type": "TEXT_CONTAINS", "values": [{"userEnteredValue": MARQUE_TELETRAVAIL}]},
-                "format": {"textFormat": {"italic": True, "foregroundColor": _rvb(GRIS)}}},
+                "format": {"backgroundColor": _rvb(_eclairci(couleur)),
+                           "textFormat": {"italic": True, "foregroundColor": _rvb(GRIS)}}},
         }, "index": 0}})
 
     # La ligne de titre n'est pas une ligne d'etage. Depuis que la bande
