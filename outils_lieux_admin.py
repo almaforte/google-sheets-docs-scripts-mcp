@@ -306,6 +306,71 @@ def _abreges_postes(sujet: str = ""):
     return abreges
 
 
+# Ordre des personnes dans la vue, regles validees par Alberto le
+# 19.09.2026 : la Direction toujours en tete ; puis le departement et le
+# service dans l'ordre du referentiel des postes, qui reflete
+# l'organigramme (une personne est classee par son poste le plus lourd,
+# a egalite par le service qui vient en premier, et un clinicien a
+# mandat administratif va sous le service de son poste admin) ; puis le
+# niveau de responsabilite lu sur l'intitule du poste ; puis l'EPT
+# administratif decroissant ; puis le nom. Aucune colonne de rang a
+# tenir a la main.
+POSTES_DE_DIRECTION = ("DG", "DIRECTEUR")
+RANG_POSTE_AUTRE = 5
+
+
+def _rang_poste(poste: str) -> int:
+    """Le niveau de responsabilite d'un poste, lu sur son intitule :
+    0 direction, 1 responsable ou CFO, 2 responsable qualifie
+    (operationnel, strategique, pole), 3 charge ou referent,
+    4 assistant ou secretaire, 5 le reste."""
+    p = _normaliser(poste)
+    if " - " in p:
+        # intitule abrege du referentiel, « ADC - Ch. projet » : le poste
+        # est apres le dernier separateur
+        p = p.split(" - ")[-1].strip()
+    if not p:
+        return RANG_POSTE_AUTRE
+    if p == "DG" or p.startswith("DIRECTEUR") or p.startswith("DIRECTRICE") or p.startswith("DIR."):
+        return 0
+    if p in ("RESPONSABLE", "RESP.", "CFO"):
+        return 1
+    if p.startswith("RESPONSABLE") or p.startswith("RESP."):
+        return 2
+    if p.startswith("CHARGE") or p.startswith("CH.") or p.startswith("REFERENT") or p.startswith("REF."):
+        return 3
+    if p.startswith("ASSISTANT") or p.startswith("ASS.") or p.startswith("SECRETAIRE"):
+        return 4
+    return RANG_POSTE_AUTRE
+
+
+def _ordre_referentiel(sujet: str = ""):
+    """({departement normalise: rang}, {service normalise: rang}) dans
+    l'ordre des lignes du referentiel des postes copie dans l'Effectif,
+    premiere apparition ; vides si l'onglet manque."""
+    try:
+        lignes = _lire(ONGLET_POSTES_REFERENTIEL, ID_EFFECTIF, sujet=sujet)
+    except Exception:  # noqa: BLE001
+        return {}, {}
+    if not lignes:
+        return {}, {}
+    tetes = lignes[0]
+    try:
+        i_departement = _colonne(tetes, "Département")
+        i_service = _colonne(tetes, "Service")
+    except RuntimeError:
+        return {}, {}
+    departements, services = {}, {}
+    for ligne in lignes[1:]:
+        departement = _normaliser(_cellule(ligne, i_departement))
+        service = _normaliser(_cellule(ligne, i_service))
+        if departement and departement not in departements:
+            departements[departement] = len(departements)
+        if service and service not in services:
+            services[service] = len(services)
+    return departements, services
+
+
 def _nombre(valeur):
     """Un nombre lu dans une cellule affichee en francais, ou None."""
     texte = str(valeur if valeur is not None else "").strip().replace("\xa0", "").replace(" ", "")
@@ -577,15 +642,16 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     services du registre en tiennent lieu, par EPT decroissant, sans la
     Direction.
 
-    Chaque personne est rangee sous le service de sa profession quand la
-    profession est un service (RH, Logistique, Secrétariat...), sinon
-    sous son service le plus lourd (un psychologue a 0,1 de Formation va
-    sous Formation). Les personnes sont groupees par departement,
-    Direction puis Administration puis Thérapies (l'ancien decoupage de
-    Services - Responsables, qui sert au tri), et dans le departement par
-    l'ordre des services de la liste maitre. L'ordre des colonnes, lui, est
-    celui des lignes de Registre - Postes admin ; le tri par service ne
-    sert plus qu'aux personnes sans postes declares, rangees apres.
+    L'ordre des colonnes suit les regles validees par Alberto le
+    19.09.2026 : la Direction en tete ; puis le departement et le service
+    du referentiel des postes, dans l'ordre de ses lignes, la personne
+    classee par son poste le plus lourd (a egalite, le service qui vient
+    en premier ; un clinicien a mandat administratif va sous le service
+    de son poste admin) ; puis le niveau de responsabilite de ce poste,
+    lu sur son intitule ; puis l'EPT administratif decroissant ; puis le
+    nom. Les lignes du cahier d'une personne vont par taux decroissant,
+    puis niveau du poste, puis service. Sans postes declares, le service
+    le plus lourd du registre classe la personne.
     """
     ordre, departements = _services(sujet=sujet)
     fiches = _engagements_admin(date_iso, sujet=sujet)
@@ -603,23 +669,44 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     def rang_departement(departement):
         return ORDRE_DEPARTEMENTS.index(departement) if departement in ORDRE_DEPARTEMENTS else len(ORDRE_DEPARTEMENTS)
 
+    ordre_departements, ordre_services = _ordre_referentiel(sujet=sujet)
+
+    def postes_de(fiche):
+        """Les postes declares d'une personne, (departement, service,
+        poste, taux), par la cle d'engagement ou a defaut par le nom."""
+        declare = list(declares_cle.get(_normaliser(fiche["cle"]), [])) if fiche["cle"] else []
+        declare += declares_nom.get(_normaliser(fiche["nom"]), [])
+        if fiche.get("nom_complet") and _normaliser(fiche["nom_complet"]) != _normaliser(fiche["nom"]):
+            declare += declares_nom.get(_normaliser(fiche["nom_complet"]), [])
+        return declare
+
+    def rang_service_referentiel(service):
+        return ordre_services.get(_normaliser(service), len(ordre_services))
+
+    def rang_departement_referentiel(service):
+        return ordre_departements.get(_normaliser(_departement_du_service(service)), len(ordre_departements))
+
     def rang(nom):
-        """L'ordre des colonnes est celui des lignes de Registre - Postes
-        admin, qu'Alberto range a sa main : une personne parait a la place
-        de son premier poste declare. Celles qui n'y figurent pas encore
-        suivent, dans l'ancien ordre des services."""
+        """Direction en tete ; puis departement et service du referentiel,
+        la personne classee par son poste le plus lourd (a egalite, le
+        service qui vient en premier) ; puis le niveau du poste ; puis
+        l'EPT administratif decroissant ; puis le nom. Sans postes
+        declares, le service le plus lourd du registre en tient lieu."""
         fiche = fiches[nom]
-        cle = _normaliser(fiche["cle"])
-        place = apparition.get(("cle", cle)) if cle else None
-        if place is None:
-            place = apparition.get(("nom", _normaliser(nom)))
-        if place is None and fiche.get("nom_complet"):
-            place = apparition.get(("nom", _normaliser(fiche["nom_complet"])))
-        if place is not None:
-            return (0, place, 0, "")
-        service = _cle_service(service_de(fiche))
-        return (1, rang_departement(departements.get(service, "")),
-                ordre.get(service, 999), _normaliser(nom))
+        declare = postes_de(fiche)
+        if declare:
+            principal = min(declare, key=lambda e: (-float(e[3] or 0.0), rang_service_referentiel(e[1])))
+            _, service, poste, _ = principal
+            direction = 0 if any(_normaliser(p) == "DG" or _normaliser(s) == _normaliser("Direction générale")
+                                 for _, s, p, _ in declare) else 1
+            rang_poste = _rang_poste(poste)
+        else:
+            candidats = [(s, v) for s, v in fiche["postes"].items() if _cle_service(s) not in integres]
+            service = max(candidats, key=lambda x: (x[1], -rang_service_referentiel(x[0])))[0] if candidats else fiche["profession"]
+            direction = 1
+            rang_poste = RANG_POSTE_AUTRE
+        return (direction, rang_departement_referentiel(service), rang_service_referentiel(service),
+                rang_poste, -round(float(fiche["ept_admin"] or 0.0), 3), _normaliser(nom))
 
     personnes = sorted(fiches, key=rang)
     cahiers, a_repartir, sans_cahier = [], {}, []
@@ -630,7 +717,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         if fiche.get("nom_complet") and _normaliser(fiche["nom_complet"]) != _normaliser(nom):
             declare += declares_nom.get(_normaliser(fiche["nom_complet"]), [])
         if declare:
-            cahier = [(d, s, p, round(float(t or 0.0), 3)) for d, s, p, t in declare]
+            cahier = sorted(((d, s, p, round(float(t or 0.0), 3)) for d, s, p, t in declare),
+                            key=lambda e: (-e[3], _rang_poste(e[2]), rang_service_referentiel(e[1])))
         else:
             sans_cahier.append(nom)
             lignes_postes = sorted(
