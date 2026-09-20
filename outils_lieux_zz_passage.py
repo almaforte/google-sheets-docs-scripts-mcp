@@ -124,7 +124,7 @@ import outils_lieux
 import outils_lieux_admin
 import outils_lieux_ponctuel
 import outils_lieux_transitoire
-from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lire, _normaliser
+from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lettre, _lire, _normaliser
 
 
 LARGEUR_REGISTRE = 11
@@ -132,11 +132,19 @@ LARGEUR_REGISTRE = 11
 ID_LISTES = outils_lieux_admin.ID_LISTES
 ONGLET_REFERENTIEL_POSTES = "Postes - Référentiel"
 ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
-# La copie occupe B a K ; la colonne A de l'onglet d'aide porte une
-# formule matricielle (la cle service|poste) qui ne doit jamais etre
-# ecrasee par une valeur, sous peine de #REF!.
-COLONNES_AIDE = 10
-DERNIERE_COLONNE_AIDE = "K"
+# Depuis le 20.09.2026 la copie est PILOTEE PAR LES EN-TETES : chaque
+# colonne du referentiel est deposee sous l'en-tete de meme nom de
+# l'onglet d'aide, dans l'ordre du referentiel, et la ligne d'en-tete de
+# l'aide est reecrite a l'identique. Le referentiel a change de structure
+# ce jour-la (colonne « Cle poste » en tete, puis Departement, Service,
+# Sous-service, Poste, Intitule EPT, Intitule EPT abrege, Nature de
+# l'EPT, Destination de l'EPT, Instance, Poste responsable, Poste
+# suppleant, Porte l'encadrement clinique, Niveau, Chemin hierarchique,
+# Controle de l'arbre, Actif, Remarque) et une copie a colonnes fixes
+# aurait decale toutes les valeurs d'un cran. Quand la cellule A1 de
+# l'aide porte encore une formule (ancienne cle matricielle), la
+# colonne A n'est pas touchee et la copie commence en B.
+COLONNES_AIDE_MAX = 26
 
 # Les quatre seules valeurs de departement qui ont le droit d'entrer dans
 # SERVICES_VERS_DEPARTEMENT. Tout le reste, a commencer par le « service
@@ -171,19 +179,21 @@ def _ecrire_registre_onze_colonnes(lignes, sujet: str = ""):
 outils_lieux._ecrire_registre = _ecrire_registre_onze_colonnes
 
 
-def _rafraichir_carte_des_services(corps):
+def _rafraichir_carte_des_services(corps, i_departement=0, i_service=1):
     """Met a jour SERVICES_VERS_DEPARTEMENT depuis le referentiel copie.
 
     Le referentiel est la source unique du couple Departement, Service :
     un service renomme doit donc suffire a corriger la carte, sans
     retoucher le code. Seules les valeurs de departement reconnues
     entrent, pour que le « service inconnu » renvoye par la formule du
-    referentiel ne se reinjecte jamais dans la carte.
+    referentiel ne se reinjecte jamais dans la carte. Les deux colonnes
+    sont reperees par leur en-tete depuis le 20.09.2026.
     """
     poses = 0
+    largeur = max(i_departement, i_service) + 1
     for ligne in corps:
-        departement = str((list(ligne) + [""] * 2)[0] or "").strip()
-        service = str((list(ligne) + [""] * 2)[1] or "").strip()
+        departement = str((list(ligne) + [""] * largeur)[i_departement] or "").strip()
+        service = str((list(ligne) + [""] * largeur)[i_service] or "").strip()
         if not service or departement not in DEPARTEMENTS_CONNUS:
             continue
         cle = _normaliser(service)
@@ -198,12 +208,12 @@ def _rafraichir_carte_des_services(corps):
 def lieux_referentiel_postes(sujet: str = ""):
     """Recopie le referentiel des postes d'Almaval - Listes vers l'Effectif.
 
-    Source : Almaval - Listes, onglet « Postes - Referentiel », colonnes
-    Departement, Service, Sous-service, Poste, Intitule EPT, Actif,
-    Remarque, Intitule EPT abrege, Destination de l'EPT, Instance.
-    Cible : Almaval - Collaborateurs - Effectif, onglet masque « Aide -
-    Postes referentiel », colonnes B a K. Sa colonne A, la cle
-    service|poste, est une formule matricielle et n'est jamais touchee.
+    Source : Almaval - Listes, onglet « Postes - Referentiel », toutes
+    ses colonnes, reperees par leur en-tete. Cible : Almaval -
+    Collaborateurs - Effectif, onglet masque « Aide - Postes
+    referentiel », en-tete reecrite a l'identique puis une ligne par
+    poste ; si A1 de l'aide porte encore une formule (ancienne cle
+    matricielle), la colonne A est laissee et la copie commence en B.
 
     Rafraichit au passage la carte service vers departement, pour qu'un
     service renomme dans le referentiel n'oblige pas a retoucher le code.
@@ -217,22 +227,58 @@ def lieux_referentiel_postes(sujet: str = ""):
     lignes = _lire(ONGLET_REFERENTIEL_POSTES, ID_LISTES, sujet=sujet)
     if len(lignes) < 2:
         return {"erreur": "référentiel vide ou introuvable", "onglet": ONGLET_REFERENTIEL_POSTES}
+    tetes = [str(t or "").strip() for t in lignes[0]]
+    while tetes and not tetes[-1]:
+        tetes.pop()
+    largeur = min(len(tetes), COLONNES_AIDE_MAX)
+    if not largeur:
+        return {"erreur": "référentiel sans ligne d'en-tête", "onglet": ONGLET_REFERENTIEL_POSTES}
+    tetes = tetes[:largeur]
+    normalisees = [_normaliser(t) for t in tetes]
+    try:
+        i_departement = normalisees.index(_normaliser("Département"))
+        i_service = normalisees.index(_normaliser("Service"))
+    except ValueError:
+        return {"erreur": "le référentiel ne porte pas les colonnes Département et Service",
+                "en_tetes": tetes}
     corps = []
     for ligne in lignes[1:]:
-        if not str((list(ligne) + [""] * 2)[1] or "").strip():
+        ligne = (list(ligne) + [""] * largeur)[:largeur]
+        if not str(ligne[i_service] or "").strip():
             continue  # pas de service : ligne vide du référentiel
-        corps.append((list(ligne) + [""] * COLONNES_AIDE)[:COLONNES_AIDE])
+        corps.append(ligne)
     if not corps:
         return {"erreur": "aucune ligne de service dans le référentiel"}
-    services_poses = _rafraichir_carte_des_services(corps)
+    services_poses = _rafraichir_carte_des_services(corps, i_departement, i_service)
+    # La colonne A de l'aide portait autrefois une formule matricielle
+    # (la cle) : si elle est encore la, on ne la touche pas et la copie
+    # commence en B ; sinon la copie commence en A, en-tete comprise.
+    formule_a1 = ""
+    try:
+        reponse = _feuilles(sujet).values().get(
+            spreadsheetId=ID_EFFECTIF, range="'" + ONGLET_AIDE_POSTES + "'!A1",
+            valueRenderOption="FORMULA").execute()
+        formule_a1 = str((reponse.get("values") or [[""]])[0][0] or "")
+    except Exception:  # noqa: BLE001
+        formule_a1 = ""
+    depart = 1 if formule_a1.startswith("=") else 0
+    if depart:
+        cle = _normaliser("Clé poste")
+        if normalisees and normalisees[0] == cle:
+            # le referentiel porte deja la cle en A : on ne la recopie pas
+            tetes, corps = tetes[1:], [l[1:] for l in corps]
+            largeur -= 1
+    premiere = _lettre(depart)
+    derniere = _lettre(depart + largeur - 1)
     _feuilles(sujet).values().clear(
         spreadsheetId=ID_EFFECTIF,
-        range="'" + ONGLET_AIDE_POSTES + "'!B2:" + DERNIERE_COLONNE_AIDE,
+        range="'" + ONGLET_AIDE_POSTES + "'!" + premiere + "1:" + _lettre(COLONNES_AIDE_MAX),
         body={},
     ).execute()
-    _ecrire(ONGLET_AIDE_POSTES, "B2:" + DERNIERE_COLONNE_AIDE + str(len(corps) + 1), corps,
+    _ecrire(ONGLET_AIDE_POSTES, premiere + "1:" + derniere + str(len(corps) + 1), [tetes] + corps,
             classeur=ID_EFFECTIF, sujet=sujet)
     return {"postes": len(corps),
+            "colonnes": tetes,
             "services_mis_a_jour": services_poses,
             "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
             "cible": "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit"}
