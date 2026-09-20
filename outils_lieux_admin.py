@@ -182,6 +182,19 @@ LARGEUR_DEMI = 60
 # La ligne « Cahier des charges » se distingue des postes qu'elle
 # coiffe : cyan pale de la gamme claire, la famille froide de la maison.
 COULEUR_CAHIER = "#d0e0e3"
+# Les deux instances de la charte de gouvernance, et la couleur de chacune
+# dans la vue (Alberto, 20.09.2026) : la ligne de titre porte les deux
+# etiquettes sur leur couleur, et chaque ligne de poste qui siege reprend
+# la couleur de son instance ; une personne a deux postes qui siegent en a
+# deux colores. Le siege est une propriete du POSTE, lue dans la colonne
+# « Instance » du referentiel des postes, jamais de la personne. Un poste
+# au Conseil de direction siege aussi au Conseil de strategie, la couleur
+# de direction l'emporte.
+INSTANCE_DIRECTION = "Conseil de direction"
+INSTANCE_STRATEGIE = "Conseil de stratégie"
+COULEURS_INSTANCES = {INSTANCE_DIRECTION: "#9fc5e8", INSTANCE_STRATEGIE: "#d9d2e9"}
+RANG_INSTANCES = {INSTANCE_DIRECTION: 0, INSTANCE_STRATEGIE: 1}
+RANG_SANS_INSTANCE = 2
 # Les taux se lisent a une decimale au moins, trois quand il le faut
 # (0,028 de formation, 0,293 de proximite).
 FORMAT_TAUX = "0.0##"
@@ -371,6 +384,34 @@ def _ordre_referentiel(sujet: str = ""):
     return departements, services
 
 
+def _instances_postes(sujet: str = ""):
+    """{(service, sous-service, poste) normalises: instance}, lu dans la
+    colonne « Instance » du referentiel des postes copie dans l'Effectif ;
+    vide si la colonne ou l'onglet manque. Seules les deux instances
+    connues sont retenues."""
+    try:
+        lignes = _lire(ONGLET_POSTES_REFERENTIEL, ID_EFFECTIF, sujet=sujet)
+    except Exception:  # noqa: BLE001
+        return {}
+    if not lignes:
+        return {}
+    tetes = lignes[0]
+    try:
+        i_service = _colonne(tetes, "Service")
+        i_sous = _colonne(tetes, "Sous-service")
+        i_poste = _colonne(tetes, "Poste")
+        i_instance = _colonne(tetes, "Instance")
+    except RuntimeError:
+        return {}
+    instances = {}
+    for ligne in lignes[1:]:
+        instance = str(_cellule(ligne, i_instance)).strip()
+        if instance in RANG_INSTANCES:
+            instances[(_normaliser(_cellule(ligne, i_service)), _normaliser(_cellule(ligne, i_sous)),
+                       _normaliser(_cellule(ligne, i_poste)))] = instance
+    return instances
+
+
 def _nombre(valeur):
     """Un nombre lu dans une cellule affichee en francais, ou None."""
     texte = str(valeur if valeur is not None else "").strip().replace("\xa0", "").replace(" ", "")
@@ -432,7 +473,8 @@ def _postes_declares(sujet: str = ""):
     """La nomenclature saisie dans Registre - Postes admin : rend
     ({cle d'engagement normalisee: [(departement, service, poste, taux)]},
     {nom normalise: [(departement, service, poste, taux)]},
-    {("cle"|"nom", identifiant): rang de premiere apparition}), dans
+    {("cle"|"nom", identifiant): rang de premiere apparition},
+    {(service, poste affiche) normalises: instance ou le poste siege}), dans
     l'ordre des lignes ; une ligne va sous sa cle quand elle en porte
     une, sous son nom sinon. Le troisieme dictionnaire donne l'ordre des
     colonnes de la vue : celui des lignes du registre, qu'Alberto range
@@ -442,16 +484,16 @@ def _postes_declares(sujet: str = ""):
     try:
         lignes = _lire_brut(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
-        return {}, {}, {}
+        return {}, {}, {}, {}
     if not lignes:
-        return {}, {}, {}
+        return {}, {}, {}, {}
     tetes = lignes[0]
     try:
         i_service = _colonne(tetes, "Service")
         i_poste = _colonne(tetes, "Poste")
         i_taux = _colonne(tetes, "Taux")
     except RuntimeError:
-        return {}, {}, {}
+        return {}, {}, {}, {}
     try:
         i_cle = _colonne(tetes, "Clé engagement")
     except RuntimeError:
@@ -465,7 +507,8 @@ def _postes_declares(sujet: str = ""):
     except RuntimeError:
         i_sous = None
     abreges = _abreges_postes(sujet=sujet) if i_sous is not None else {}
-    par_cle, par_nom, apparition = {}, {}, {}
+    instances = _instances_postes(sujet=sujet)
+    par_cle, par_nom, apparition, sieges = {}, {}, {}, {}
     for ligne in lignes[1:]:
         service = str(_cellule(ligne, i_service)).strip()
         poste = str(_cellule(ligne, i_poste)).strip()
@@ -473,9 +516,12 @@ def _postes_declares(sujet: str = ""):
         if not poste and not service:
             continue
         sous = str(_cellule(ligne, i_sous)).strip() if i_sous is not None else ""
+        instance = instances.get((_normaliser(service), _normaliser(sous), _normaliser(poste)))
         if sous:
             poste = abreges.get((_normaliser(service), _normaliser(sous), _normaliser(poste)),
                                 poste + " " + sous)
+        if instance:
+            sieges[(_normaliser(service), _normaliser(poste))] = instance
         departement = _departement_du_service(service)
         entree = (departement, service, poste, taux if taux is not None else 0.0)
         cle = _normaliser(_cellule(ligne, i_cle)) if i_cle is not None else ""
@@ -486,7 +532,7 @@ def _postes_declares(sujet: str = ""):
         elif nom:
             par_nom.setdefault(nom, []).append(entree)
             apparition.setdefault(("nom", nom), len(apparition))
-    return par_cle, par_nom, apparition
+    return par_cle, par_nom, apparition, sieges
 
 
 def _engagements_admin(date_iso: str, sujet: str = ""):
@@ -655,7 +701,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     """
     ordre, departements = _services(sujet=sujet)
     fiches = _engagements_admin(date_iso, sujet=sujet)
-    declares_cle, declares_nom, apparition = _postes_declares(sujet=sujet)
+    declares_cle, declares_nom, apparition, sieges = _postes_declares(sujet=sujet)
     integres = {_cle_service(s) for s in SERVICES_INTEGRES}
 
     def service_de(fiche):
@@ -686,8 +732,19 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     def rang_departement_referentiel(service):
         return ordre_departements.get(_normaliser(_departement_du_service(service)), len(ordre_departements))
 
+    def instance_de(service, poste):
+        return sieges.get((_normaliser(service), _normaliser(poste)))
+
+    def rang_instance(declare):
+        """0 si un poste siege au Conseil de direction, 1 si un poste siege
+        au Conseil de strategie, 2 sinon (Alberto, 20.09.2026)."""
+        rangs = [RANG_INSTANCES[i] for i in (instance_de(s, p) for _, s, p, _ in declare) if i]
+        return min(rangs) if rangs else RANG_SANS_INSTANCE
+
     def rang(nom):
-        """Direction en tete ; puis departement et service du referentiel,
+        """Ceux qui siegent au Conseil de direction d'abord, puis ceux qui
+        siegent au Conseil de strategie, puis le reste ; dans chaque groupe,
+        Direction en tete ; puis departement et service du referentiel,
         la personne classee par son poste le plus lourd (a egalite, le
         service qui vient en premier) ; puis le niveau du poste ; puis
         l'EPT administratif decroissant ; puis le nom. Sans postes
@@ -705,7 +762,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
             service = max(candidats, key=lambda x: (x[1], -rang_service_referentiel(x[0])))[0] if candidats else fiche["profession"]
             direction = 1
             rang_poste = RANG_POSTE_AUTRE
-        return (direction, rang_departement_referentiel(service), rang_service_referentiel(service),
+        return (rang_instance(declare), direction,
+                rang_departement_referentiel(service), rang_service_referentiel(service),
                 rang_poste, -round(float(fiche["ept_admin"] or 0.0), 3), _normaliser(nom))
 
     personnes = sorted(fiches, key=rang)
@@ -739,6 +797,15 @@ def _grille_admin(date_iso: str, sujet: str = ""):
 
     titre = "Postes admin par personne au " + _jolie_date(date_iso)
     grille = [[titre] + [""] * (largeur - 1)]
+    # les etiquettes des deux instances, sur la ligne de titre, dans les
+    # blocs de la deuxieme et de la troisieme personne (le titre deborde
+    # sur le premier bloc)
+    legende = []
+    for rang_bloc, instance in ((1, INSTANCE_DIRECTION), (2, INSTANCE_STRATEGIE)):
+        c = 2 + 4 * rang_bloc
+        if c + 4 <= largeur:
+            grille[0][c] = instance
+            legende.append((0, c, instance))
     entete = vide()
     entete[0] = "Jour"
     entete[1] = SITE_ADMIN
@@ -752,6 +819,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
 
     r_attributs = len(grille)
     roses = []  # (ligne, colonne) a peindre en rose
+    cases_sieges = []  # (ligne, colonne de depart, instance) : lignes de poste qui siegent
     sans_departement = set()
     for p in range(n_postes):
         ligne = vide()
@@ -765,6 +833,9 @@ def _grille_admin(date_iso: str, sujet: str = ""):
                     roses += [(len(grille), c), (len(grille), c + 1), (len(grille), c + 2), (len(grille), c + 3)]
                 elif service and not departement:
                     sans_departement.add(service)
+                instance = sieges.get((_normaliser(service), _normaliser(poste)))
+                if instance:
+                    cases_sieges.append((len(grille), c, instance))
         grille.append(ligne)
     total = vide()
     total[0] = LIBELLE_TOTAL
@@ -821,6 +892,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         "r_fin": len(grille),
         "presences": presences_jour,
         "roses": roses,
+        "sieges": cases_sieges,
+        "legende": legende,
         "ecarts": ecarts,
         "n_postes": n_postes,
         "sans_cahier": sans_cahier,
@@ -882,6 +955,8 @@ def _fusions_admin(sid: int, grille, meta):
     for k in range(len(meta["personnes"])):
         c = 2 + 4 * k
         requetes.append(fusion(meta["r_entete"], meta["r_entete"] + 1, c, c + 4))
+    for r, c, _ in meta.get("legende", []):
+        requetes.append(fusion(r, r + 1, c, c + 4))
     for j in range(len(JOURS)):
         r_matin = meta["r_jours"] + 2 * j
         requetes.append(fusion(r_matin, r_matin + 2, 0, 1))
@@ -969,6 +1044,14 @@ def _charte_admin(sid: int, grille, meta, couleurs):
                           "startColumnIndex": c, "endColumnIndex": c + 1},
                 "cell": {"userEnteredFormat": {"backgroundColor": _rvb(ROSE)}},
                 "fields": "userEnteredFormat.backgroundColor"}})
+        # les lignes de poste qui siegent reprennent la couleur de leur
+        # instance, sur leurs quatre colonnes
+        for r, c, instance in meta.get("sieges", []):
+            requetes.append({"repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": r, "endRowIndex": r + 1,
+                          "startColumnIndex": c, "endColumnIndex": c + 4},
+                "cell": {"userEnteredFormat": {"backgroundColor": _rvb(COULEURS_INSTANCES[instance])}},
+                "fields": "userEnteredFormat.backgroundColor"}})
 
     # aucun filet vertical entre Departement, Service, Poste et Taux
     # d'une meme personne : la charte des bureaux en pose un entre chaque
@@ -1034,6 +1117,15 @@ def _charte_admin(sid: int, grille, meta, couleurs):
         "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.wrapStrategy"}})
     requetes.append(bords(0, 1, 0, meta["largeur"], innerVertical=aucun,
                           top=aucun, bottom=aucun, left=aucun, right=aucun))
+    # les etiquettes des instances, sur leur couleur, en gras, centrees
+    for r, c, instance in meta.get("legende", []):
+        requetes.append({"repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": r, "endRowIndex": r + 1,
+                      "startColumnIndex": c, "endColumnIndex": c + 4},
+            "cell": {"userEnteredFormat": {"backgroundColor": _rvb(COULEURS_INSTANCES[instance]),
+                                           "horizontalAlignment": "CENTER",
+                                           "textFormat": {"bold": True}}},
+            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold"}})
 
     # onglet de consultation : protege, ecrit par le moteur
     requetes.append({"addProtectedRange": {"protectedRange": {
