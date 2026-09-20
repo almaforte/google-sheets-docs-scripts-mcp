@@ -213,6 +213,13 @@ FILET_POSTES = "DASHED"
 # se calcule depuis Service (voir SERVICES_VERS_DEPARTEMENT), pour ne pas
 # dupliquer a la main une regle fixe du schema de gouvernance.
 ONGLET_POSTES = "Registre - Postes admin"
+# Depuis le 20.09.2026 le registre des postes tenus s'appelle « Registre -
+# Affectations » (une ligne par affectation, postes cliniques compris,
+# colonne « Nature de l'EPT ») ; l'ancien nom reste lu a defaut. Seules
+# les affectations dont la nature est administrative entrent dans la
+# vue, et seules celles qui n'ont pas de date de fin passee.
+ONGLETS_POSTES = ("Registre - Affectations", ONGLET_POSTES)
+NATURE_ADMINISTRATIVE = "Administratif"
 COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Service", "Poste", "Taux")
 # Le referentiel des postes recopie dans l'Effectif : quand une ligne du
 # cahier des charges porte un sous-service (ADC, Communication...), la
@@ -487,10 +494,14 @@ def _postes_declares(sujet: str = ""):
     a sa main (15.09.2026 au soir). Le departement de chaque ligne est calcule depuis son
     service (SERVICES_VERS_DEPARTEMENT), jamais lu dans le registre. Sans
     l'onglet, la vue se fait avec les services du registre."""
-    try:
-        lignes = _lire_brut(ONGLET_POSTES, ID_EFFECTIF, sujet=sujet)
-    except Exception:  # noqa: BLE001
-        return {}, {}, {}, {}
+    lignes = []
+    for onglet in ONGLETS_POSTES:
+        try:
+            lignes = _lire_brut(onglet, ID_EFFECTIF, sujet=sujet)
+        except Exception:  # noqa: BLE001
+            lignes = []
+        if lignes:
+            break
     if not lignes:
         return {}, {}, {}, {}
     tetes = lignes[0]
@@ -500,6 +511,15 @@ def _postes_declares(sujet: str = ""):
         i_taux = _colonne(tetes, "Taux")
     except RuntimeError:
         return {}, {}, {}, {}
+    try:
+        i_nature = _colonne(tetes, "Nature de l'EPT")
+    except RuntimeError:
+        i_nature = None
+    try:
+        i_fin = _colonne(tetes, "Date de fin")
+    except RuntimeError:
+        i_fin = None
+    aujourdhui = _aujourdhui() if i_fin is not None else None
     try:
         i_cle = _colonne(tetes, "Clé engagement")
     except RuntimeError:
@@ -521,6 +541,14 @@ def _postes_declares(sujet: str = ""):
         taux = _nombre(_cellule(ligne, i_taux))
         if not poste and not service:
             continue
+        if i_nature is not None:
+            nature = str(_cellule(ligne, i_nature)).strip()
+            if nature and _normaliser(nature) != _normaliser(NATURE_ADMINISTRATIVE):
+                continue  # affectation clinique : hors de la vue des postes admin
+        if i_fin is not None and aujourdhui is not None:
+            fin = _date_serie(_cellule(ligne, i_fin))
+            if fin and fin < aujourdhui:
+                continue  # affectation terminee
         sous = str(_cellule(ligne, i_sous)).strip() if i_sous is not None else ""
         instance = instances.get((_normaliser(service), _normaliser(sous), _normaliser(poste)))
         if sous:
