@@ -132,7 +132,19 @@ LARGEUR_REGISTRE = 11
 ID_LISTES = outils_lieux_admin.ID_LISTES
 ONGLET_REFERENTIEL_POSTES = "Postes - Référentiel"
 ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
-# Depuis le 20.09.2026 la copie est PILOTEE PAR LES EN-TETES : chaque
+# Depuis le 20.09.2026 au soir la copie APPARTIENT AU MOTEUR DES POSTES,
+# fichier « 28 Postes et responsables » du projet Apps Script d'onboarding,
+# qui la depose a 4 h 45 (poserLAideDesPostes) et que « 28b Charte des
+# postes » protege a 5 h 15, editeurs am.forte@ et gestion@ seulement. Le
+# moteur des lieux, qui tourne sous un autre compte, s'est vu refuser
+# l'ecriture le 20.09.2026 (« Vous tentez de modifier une cellule ou un
+# objet protégés »). Deux moteurs qui ecrivent le meme onglet, c'est deux
+# portes pour une meme information : ce module ne fait donc plus que
+# LIRE la copie, verifier qu'elle est a jour vis-a-vis du referentiel, et
+# rafraichir la carte des services. Il n'ecrit la copie qu'a defaut, si
+# l'onglet d'aide est vide ou absent, pour ne pas laisser la vue des
+# postes admin sans referentiel.
+# La copie est PILOTEE PAR LES EN-TETES : chaque
 # colonne du referentiel est deposee sous l'en-tete de meme nom de
 # l'onglet d'aide, dans l'ordre du referentiel, et la ligne d'en-tete de
 # l'aide est reecrite a l'identique. Le referentiel a change de structure
@@ -206,14 +218,16 @@ def _rafraichir_carte_des_services(corps, i_departement=0, i_service=1):
 @mcp.tool()
 @tolerant
 def lieux_referentiel_postes(sujet: str = ""):
-    """Recopie le referentiel des postes d'Almaval - Listes vers l'Effectif.
+    """Controle la copie du referentiel des postes dans l'Effectif.
 
     Source : Almaval - Listes, onglet « Postes - Referentiel », toutes
-    ses colonnes, reperees par leur en-tete. Cible : Almaval -
+    ses colonnes, reperees par leur en-tete. Copie : Almaval -
     Collaborateurs - Effectif, onglet masque « Aide - Postes
-    referentiel », en-tete reecrite a l'identique puis une ligne par
-    poste ; si A1 de l'aide porte encore une formule (ancienne cle
-    matricielle), la colonne A est laissee et la copie commence en B.
+    referentiel », ecrite chaque matin a 4 h 45 par le moteur des postes
+    (Apps Script « 28 Postes et responsables ») et protegee par sa
+    charte. Depuis le 20.09.2026 au soir ce geste ne l'ecrit plus : il la
+    relit, dit si elle est a jour (memes en-tetes, memes couples service
+    et poste) et ne l'ecrit qu'a defaut, si l'onglet est vide.
 
     Rafraichit au passage la carte service vers departement, pour qu'un
     service renomme dans le referentiel n'oblige pas a retoucher le code.
@@ -250,6 +264,41 @@ def lieux_referentiel_postes(sujet: str = ""):
     if not corps:
         return {"erreur": "aucune ligne de service dans le référentiel"}
     services_poses = _rafraichir_carte_des_services(corps, i_departement, i_service)
+    # La copie appartient au moteur des postes (28, 4 h 45) : on la relit,
+    # on la compare au referentiel, et on n'ecrit qu'a defaut de copie.
+    copie = []
+    try:
+        copie = _lire(ONGLET_AIDE_POSTES, ID_EFFECTIF, sujet=sujet) or []
+    except Exception:  # noqa: BLE001
+        copie = []
+    copie_tetes = [str(t or "").strip() for t in (copie[0] if copie else [])]
+    while copie_tetes and not copie_tetes[-1]:
+        copie_tetes.pop()
+    copie_corps = [l for l in copie[1:] if any(str(c or "").strip() for c in l)]
+    if copie_corps:
+        cles_ref = set()
+        cles_copie = set()
+        try:
+            j_service = [_normaliser(t) for t in copie_tetes].index(_normaliser("Service"))
+            j_poste = [_normaliser(t) for t in copie_tetes].index(_normaliser("Poste"))
+            i_poste = normalisees.index(_normaliser("Poste"))
+            cles_ref = {(_normaliser(l[i_service]), _normaliser(l[i_poste])) for l in corps}
+            cles_copie = {(_normaliser((list(l) + [""] * (j_poste + 1))[j_service]),
+                           _normaliser((list(l) + [""] * (j_poste + 1))[j_poste])) for l in copie_corps}
+        except ValueError:
+            pass
+        a_jour = (copie_tetes == tetes) and (cles_ref == cles_copie)
+        return {"postes": len(corps),
+                "colonnes": tetes,
+                "services_mis_a_jour": services_poses,
+                "copie": "à jour" if a_jour else "en retard sur le référentiel",
+                "copie_postes": len(copie_corps),
+                "copie_ecrite_par": "moteur des postes (Apps Script « 28 Postes et responsables », 4 h 45) ; "
+                                    "ce passage ne l'écrit plus",
+                "manquants_dans_la_copie": sorted(" > ".join(c) for c in (cles_ref - cles_copie))[:20],
+                "en_trop_dans_la_copie": sorted(" > ".join(c) for c in (cles_copie - cles_ref))[:20],
+                "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
+                "cible": "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit"}
     # La colonne A de l'aide portait autrefois une formule matricielle
     # (la cle) : si elle est encore la, on ne la touche pas et la copie
     # commence en B ; sinon la copie commence en A, en-tete comprise.
@@ -280,6 +329,7 @@ def lieux_referentiel_postes(sujet: str = ""):
     return {"postes": len(corps),
             "colonnes": tetes,
             "services_mis_a_jour": services_poses,
+            "copie": "écrite à défaut, l'onglet d'aide était vide",
             "source": "https://docs.google.com/spreadsheets/d/" + ID_LISTES + "/edit",
             "cible": "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit"}
 
