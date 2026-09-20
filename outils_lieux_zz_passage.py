@@ -58,8 +58,12 @@ copie dans l'onglet masque « Aide - Postes referentiel » de l'Effectif,
 comme il est deja fait ailleurs pour les comptes MediOnline. Registre -
 Postes admin et l'onglet « Index des EPT » lisent cette copie locale.
 
-Depuis le 16.09.2026 au soir la copie porte NEUF colonnes du referentiel,
-deposees de B a J, la Remarque comprise. Le referentiel a gagne ce
+Depuis le 16.09.2026 au soir la copie porte les colonnes du referentiel,
+deposees a partir de B, la Remarque comprise : neuf ce jour-la, dix
+depuis le 20.09.2026 avec « Instance », qui dit si un poste siege au
+Conseil de direction ou au Conseil de strategie (Alberto, 20.09.2026 :
+le siege est une propriete du poste, la vue des postes admin range
+d'abord ceux qui siegent et colore leurs lignes). Le referentiel a gagne ce
 jour-la « Intitule EPT abrege », le nom rapide destine au classeur de
 Gestion, et « Destination de l'EPT », qui dit si le temps de ce poste
 conditionne la facturation d'une seance (valeur Therapies : encadrement,
@@ -128,10 +132,11 @@ LARGEUR_REGISTRE = 11
 ID_LISTES = outils_lieux_admin.ID_LISTES
 ONGLET_REFERENTIEL_POSTES = "Postes - Référentiel"
 ONGLET_AIDE_POSTES = "Aide - Postes référentiel"
-# La copie occupe B a J ; la colonne A de l'onglet d'aide porte une
+# La copie occupe B a K ; la colonne A de l'onglet d'aide porte une
 # formule matricielle (la cle service|poste) qui ne doit jamais etre
 # ecrasee par une valeur, sous peine de #REF!.
-COLONNES_AIDE = 9
+COLONNES_AIDE = 10
+DERNIERE_COLONNE_AIDE = "K"
 
 # Les quatre seules valeurs de departement qui ont le droit d'entrer dans
 # SERVICES_VERS_DEPARTEMENT. Tout le reste, a commencer par le « service
@@ -195,9 +200,9 @@ def lieux_referentiel_postes(sujet: str = ""):
 
     Source : Almaval - Listes, onglet « Postes - Referentiel », colonnes
     Departement, Service, Sous-service, Poste, Intitule EPT, Actif,
-    Remarque, Intitule EPT abrege, Destination de l'EPT.
+    Remarque, Intitule EPT abrege, Destination de l'EPT, Instance.
     Cible : Almaval - Collaborateurs - Effectif, onglet masque « Aide -
-    Postes referentiel », colonnes B a J. Sa colonne A, la cle
+    Postes referentiel », colonnes B a K. Sa colonne A, la cle
     service|poste, est une formule matricielle et n'est jamais touchee.
 
     Rafraichit au passage la carte service vers departement, pour qu'un
@@ -222,10 +227,10 @@ def lieux_referentiel_postes(sujet: str = ""):
     services_poses = _rafraichir_carte_des_services(corps)
     _feuilles(sujet).values().clear(
         spreadsheetId=ID_EFFECTIF,
-        range="'" + ONGLET_AIDE_POSTES + "'!B2:J",
+        range="'" + ONGLET_AIDE_POSTES + "'!B2:" + DERNIERE_COLONNE_AIDE,
         body={},
     ).execute()
-    _ecrire(ONGLET_AIDE_POSTES, "B2:J" + str(len(corps) + 1), corps,
+    _ecrire(ONGLET_AIDE_POSTES, "B2:" + DERNIERE_COLONNE_AIDE + str(len(corps) + 1), corps,
             classeur=ID_EFFECTIF, sujet=sujet)
     return {"postes": len(corps),
             "services_mis_a_jour": services_poses,
