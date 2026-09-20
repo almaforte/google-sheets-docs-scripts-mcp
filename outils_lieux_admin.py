@@ -398,10 +398,13 @@ def _ordre_referentiel(sujet: str = ""):
 
 
 def _instances_postes(sujet: str = ""):
-    """{(service, sous-service, poste) normalises: instance}, lu dans la
-    colonne « Instance » du referentiel des postes copie dans l'Effectif ;
-    vide si la colonne ou l'onglet manque. Seules les deux instances
-    connues sont retenues."""
+    """{(service, sous-service, poste) normalises: instance}, lu dans le
+    referentiel des postes copie dans l'Effectif. Depuis le 20.09.2026
+    apres-midi le referentiel porte deux colonnes a croix, « Conseil de
+    direction » et « Conseil de strategie » (un poste au Conseil de
+    direction siege aussi au Conseil de strategie, la direction
+    l'emporte) ; l'ancienne colonne unique « Instance » est lue a defaut.
+    Vide si l'onglet manque."""
     try:
         lignes = _lire(ONGLET_POSTES_REFERENTIEL, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
@@ -413,12 +416,27 @@ def _instances_postes(sujet: str = ""):
         i_service = _colonne(tetes, "Service")
         i_sous = _colonne(tetes, "Sous-service")
         i_poste = _colonne(tetes, "Poste")
-        i_instance = _colonne(tetes, "Instance")
     except RuntimeError:
         return {}
+    i_direction = i_strategie = i_instance = None
+    try:
+        i_direction = _colonne(tetes, INSTANCE_DIRECTION)
+        i_strategie = _colonne(tetes, INSTANCE_STRATEGIE)
+    except RuntimeError:
+        try:
+            i_instance = _colonne(tetes, "Instance")
+        except RuntimeError:
+            return {}
     instances = {}
     for ligne in lignes[1:]:
-        instance = str(_cellule(ligne, i_instance)).strip()
+        instance = ""
+        if i_instance is not None:
+            instance = str(_cellule(ligne, i_instance)).strip()
+        else:
+            if _normaliser(_cellule(ligne, i_direction)) == "X":
+                instance = INSTANCE_DIRECTION
+            elif _normaliser(_cellule(ligne, i_strategie)) == "X":
+                instance = INSTANCE_STRATEGIE
         if instance in RANG_INSTANCES:
             instances[(_normaliser(_cellule(ligne, i_service)), _normaliser(_cellule(ligne, i_sous)),
                        _normaliser(_cellule(ligne, i_poste)))] = instance
