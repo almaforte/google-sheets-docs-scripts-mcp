@@ -181,18 +181,24 @@ LARGEUR_JOUR = 80
 LARGEUR_DEMI = 60
 # La ligne « Cahier des charges » se distingue des postes qu'elle
 # coiffe : cyan pale de la gamme claire, la famille froide de la maison.
-COULEUR_CAHIER = "#d0e0e3"
+# La ligne « Cahier des charges » est doree comme la ligne des noms
+# (Alberto, 20.09.2026, mise en forme faite a la main dans Postes admin
+# et reprise ici).
+COULEUR_CAHIER = "#f7cb4d"
 # Les deux instances de la charte de gouvernance, et la couleur de chacune
-# dans la vue (Alberto, 20.09.2026) : la ligne de titre porte les deux
-# etiquettes sur leur couleur, et chaque ligne de poste qui siege reprend
-# la couleur de son instance ; une personne a deux postes qui siegent en a
-# deux colores. Le siege est une propriete du POSTE, lue dans la colonne
+# dans la vue (Alberto, 20.09.2026) : A1 porte « Legende couleurs : », les
+# deux cellules de gauche de la ligne des noms portent les etiquettes sur
+# leur couleur (vert pale pour la direction, rose pale pour la strategie,
+# teintes posees a la main par Alberto le 20.09.2026), et chaque ligne de
+# poste qui siege reprend la couleur de son instance ; une personne a deux
+# postes qui siegent en a deux colores. Le siege est une propriete du POSTE, lue dans la colonne
 # « Instance » du referentiel des postes, jamais de la personne. Un poste
 # au Conseil de direction siege aussi au Conseil de strategie, la couleur
 # de direction l'emporte.
 INSTANCE_DIRECTION = "Conseil de direction"
 INSTANCE_STRATEGIE = "Conseil de stratégie"
-COULEURS_INSTANCES = {INSTANCE_DIRECTION: "#9fc5e8", INSTANCE_STRATEGIE: "#d9d2e9"}
+COULEURS_INSTANCES = {INSTANCE_DIRECTION: "#d9ead3", INSTANCE_STRATEGIE: "#ead1dc"}
+LIBELLE_LEGENDE = "Légende couleurs :"
 RANG_INSTANCES = {INSTANCE_DIRECTION: 0, INSTANCE_STRATEGIE: 1}
 RANG_SANS_INSTANCE = 2
 # Les taux se lisent a une decimale au moins, trois quand il le faut
@@ -795,20 +801,16 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     def vide():
         return [""] * largeur
 
-    titre = "Postes admin par personne au " + _jolie_date(date_iso)
-    grille = [[titre] + [""] * (largeur - 1)]
-    # les etiquettes des deux instances, sur la ligne de titre, dans les
-    # blocs de la deuxieme et de la troisieme personne (le titre deborde
-    # sur le premier bloc)
-    legende = []
-    for rang_bloc, instance in ((1, INSTANCE_DIRECTION), (2, INSTANCE_STRATEGIE)):
-        c = 2 + 4 * rang_bloc
-        if c + 4 <= largeur:
-            grille[0][c] = instance
-            legende.append((0, c, instance))
+    # La ligne 1 ne porte plus de titre date : « Legende couleurs : » a
+    # gauche, la date etant celle du passage du matin (Alberto,
+    # 20.09.2026). Les deux etiquettes d'instance occupent les deux
+    # cellules de gauche de la ligne des noms, a la place de « Jour » ; la
+    # facade rendue a la charte des bureaux garde « Jour » (voir _facade).
+    grille = [[LIBELLE_LEGENDE] + [""] * (largeur - 1)]
     entete = vide()
-    entete[0] = "Jour"
-    entete[1] = SITE_ADMIN
+    entete[0] = INSTANCE_DIRECTION
+    entete[1] = INSTANCE_STRATEGIE
+    legende = [(1, 0, INSTANCE_DIRECTION), (1, 1, INSTANCE_STRATEGIE)]
     intitules = vide()
     intitules[0] = LIBELLE_CAHIER
     for k, nom in enumerate(personnes):
@@ -913,8 +915,10 @@ def _facade(grille, meta):
     facade = [list(l) for r, l in enumerate(grille) if r not in exclues]
     r_entete = meta["r_entete"]
     if 0 <= r_entete < len(facade) and len(facade[r_entete]) > 1:
-        if not str(facade[r_entete][1] or "").strip():
-            facade[r_entete][1] = SITE_ADMIN_TECHNIQUE
+        # la vue livree porte les etiquettes d'instance a la place de
+        # « Jour » et du site : la facade remet ce que _blocs attend
+        facade[r_entete][0] = "Jour"
+        facade[r_entete][1] = SITE_ADMIN_TECHNIQUE
     return facade
 
 
@@ -955,8 +959,6 @@ def _fusions_admin(sid: int, grille, meta):
     for k in range(len(meta["personnes"])):
         c = 2 + 4 * k
         requetes.append(fusion(meta["r_entete"], meta["r_entete"] + 1, c, c + 4))
-    for r, c, _ in meta.get("legende", []):
-        requetes.append(fusion(r, r + 1, c, c + 4))
     for j in range(len(JOURS)):
         r_matin = meta["r_jours"] + 2 * j
         requetes.append(fusion(r_matin, r_matin + 2, 0, 1))
@@ -1117,15 +1119,21 @@ def _charte_admin(sid: int, grille, meta, couleurs):
         "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.wrapStrategy"}})
     requetes.append(bords(0, 1, 0, meta["largeur"], innerVertical=aucun,
                           top=aucun, bottom=aucun, left=aucun, right=aucun))
-    # les etiquettes des instances, sur leur couleur, en gras, centrees
+    # les etiquettes des instances, sur leur couleur, en gras, centrees,
+    # dans les deux cellules de gauche de la ligne des noms
     for r, c, instance in meta.get("legende", []):
         requetes.append({"repeatCell": {
             "range": {"sheetId": sid, "startRowIndex": r, "endRowIndex": r + 1,
-                      "startColumnIndex": c, "endColumnIndex": c + 4},
+                      "startColumnIndex": c, "endColumnIndex": c + 1},
             "cell": {"userEnteredFormat": {"backgroundColor": _rvb(COULEURS_INSTANCES[instance]),
                                            "horizontalAlignment": "CENTER",
+                                           "wrapStrategy": "WRAP",
                                            "textFormat": {"bold": True}}},
-            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold"}})
+            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.bold"}})
+    # la ligne des noms est encadree en haut et en bas d'un filet moyen
+    # (Alberto, 20.09.2026)
+    requetes.append(bords(meta["r_entete"], meta["r_entete"] + 1, 0, meta["largeur"],
+                          top=filet, bottom=filet))
 
     # onglet de consultation : protege, ecrit par le moteur
     requetes.append({"addProtectedRange": {"protectedRange": {
