@@ -200,6 +200,9 @@ INSTANCE_STRATEGIE = "Conseil de stratégie"
 COULEURS_INSTANCES = {INSTANCE_DIRECTION: "#d9ead3", INSTANCE_STRATEGIE: "#ead1dc"}
 LIBELLE_LEGENDE = "Légende couleurs :"
 RANG_INSTANCES = {INSTANCE_DIRECTION: 0, INSTANCE_STRATEGIE: 1}
+# Colonne du referentiel qui deplace le siege d'un poste vers un autre
+# (cle « Service > Sous-service > Poste » du delegataire).
+SIEGE_DELEGUE = "Siège délégué au poste"
 RANG_SANS_INSTANCE = 2
 # Les taux se lisent a une decimale au moins, trois quand il le faut
 # (0,028 de formation, 0,293 de proximite).
@@ -404,7 +407,10 @@ def _instances_postes(sujet: str = ""):
     direction » et « Conseil de strategie » (un poste au Conseil de
     direction siege aussi au Conseil de strategie, la direction
     l'emporte) ; l'ancienne colonne unique « Instance » est lue a defaut.
-    Vide si l'onglet manque."""
+    La colonne « Siege delegue au poste » deplace le siege vers le poste
+    delegataire, qui seul est colore et range parmi les sieges (le
+    20.09.2026 au soir : Qualite > Responsable delegue son siege a
+    Qualite > Responsable pole patients). Vide si l'onglet manque."""
     try:
         lignes = _lire(ONGLET_POSTES_REFERENTIEL, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
@@ -427,8 +433,28 @@ def _instances_postes(sujet: str = ""):
             i_instance = _colonne(tetes, "Instance")
         except RuntimeError:
             return {}
-    instances = {}
+    i_cle = i_delegue = None
+    try:
+        i_cle = _colonne(tetes, "Clé poste")
+    except RuntimeError:
+        i_cle = None
+    try:
+        i_delegue = _colonne(tetes, SIEGE_DELEGUE)
+    except RuntimeError:
+        i_delegue = None
+    instances, par_cle, delegations = {}, {}, []
     for ligne in lignes[1:]:
+        triplet = (_normaliser(_cellule(ligne, i_service)), _normaliser(_cellule(ligne, i_sous)),
+                   _normaliser(_cellule(ligne, i_poste)))
+        if not triplet[0] or not triplet[2]:
+            continue  # sous-service seul, sans poste : rien ne siege
+        # la cle du referentiel, ou sa reconstruction « Service > Sous-service > Poste »
+        cle = _normaliser(_cellule(ligne, i_cle)) if i_cle is not None else ""
+        if not cle:
+            cle = _normaliser(" > ".join(x for x in (
+                str(_cellule(ligne, i_service)).strip(), str(_cellule(ligne, i_sous)).strip(),
+                str(_cellule(ligne, i_poste)).strip()) if x))
+        par_cle[cle] = triplet
         instance = ""
         if i_instance is not None:
             instance = str(_cellule(ligne, i_instance)).strip()
@@ -437,9 +463,26 @@ def _instances_postes(sujet: str = ""):
                 instance = INSTANCE_DIRECTION
             elif _normaliser(_cellule(ligne, i_strategie)) == "X":
                 instance = INSTANCE_STRATEGIE
-        if instance in RANG_INSTANCES:
-            instances[(_normaliser(_cellule(ligne, i_service)), _normaliser(_cellule(ligne, i_sous)),
-                       _normaliser(_cellule(ligne, i_poste)))] = instance
+        if instance not in RANG_INSTANCES:
+            continue
+        delegue = _normaliser(_cellule(ligne, i_delegue)) if i_delegue is not None else ""
+        if delegue:
+            delegations.append((triplet, delegue, instance))
+        else:
+            instances[triplet] = instance
+    # Le siege delegue est porte par le poste delegataire, jamais par les
+    # deux : Alberto, 20.09.2026, « la delegation reste chez Steph quand
+    # meme pour le CoDir ». Un delegataire qui siege deja garde le rang
+    # le plus eleve ; une cle de delegue inconnue laisse le siege au
+    # titulaire, pour ne rien perdre.
+    for triplet, delegue, instance in delegations:
+        cible = par_cle.get(delegue)
+        if cible is None:
+            instances[triplet] = instance
+            continue
+        actuelle = instances.get(cible)
+        if actuelle is None or RANG_INSTANCES[instance] < RANG_INSTANCES[actuelle]:
+            instances[cible] = instance
     return instances
 
 
