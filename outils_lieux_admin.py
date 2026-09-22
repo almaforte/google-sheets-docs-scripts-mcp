@@ -198,6 +198,14 @@ COULEUR_CAHIER = "#f7cb4d"
 INSTANCE_DIRECTION = "Conseil de direction"
 INSTANCE_STRATEGIE = "Conseil de stratégie"
 COULEURS_INSTANCES = {INSTANCE_DIRECTION: "#d9ead3", INSTANCE_STRATEGIE: "#ead1dc"}
+# Une ligne de poste qui ne siege a aucun conseil porte la teinte sable de
+# la charte (Alberto, 22.09.2026, apres le controle du chantier de la
+# presence : « la teinte #fbe9b8 des lignes de poste qui ne siegent pas,
+# que le moteur n'applique pas »). Les trois teintes se lisent alors
+# ensemble : vert pale pour la direction, rose pale pour la strategie,
+# sable pour un poste qui ne siege pas. Le rose d'ecart #f4cccc reste
+# au-dessus, et une cellule de poste vide n'est pas peinte.
+COULEUR_POSTE = "#fbe9b8"
 LIBELLE_LEGENDE = "Légende couleurs :"
 RANG_INSTANCES = {INSTANCE_DIRECTION: 0, INSTANCE_STRATEGIE: 1}
 # Colonne du referentiel qui deplace le siege d'un poste vers un autre
@@ -911,6 +919,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
     r_attributs = len(grille)
     roses = []  # (ligne, colonne) a peindre en rose
     cases_sieges = []  # (ligne, colonne de depart, instance) : lignes de poste qui siegent
+    cases_postes = []  # (ligne, colonne de depart) : lignes de poste qui ne siegent pas
     sans_departement = set()
     for p in range(n_postes):
         ligne = vide()
@@ -927,6 +936,8 @@ def _grille_admin(date_iso: str, sujet: str = ""):
                 instance = sieges.get((_normaliser(service), _normaliser(poste)))
                 if instance:
                     cases_sieges.append((len(grille), c, instance))
+                elif poste and poste != A_REPARTIR:
+                    cases_postes.append((len(grille), c))
         grille.append(ligne)
     total = vide()
     total[0] = LIBELLE_TOTAL
@@ -984,6 +995,7 @@ def _grille_admin(date_iso: str, sujet: str = ""):
         "presences": presences_jour,
         "roses": roses,
         "sieges": cases_sieges,
+        "postes": cases_postes,
         "legende": legende,
         "ecarts": ecarts,
         "n_postes": n_postes,
@@ -1127,6 +1139,16 @@ def _charte_admin(sid: int, grille, meta, couleurs):
                           "startColumnIndex": c, "endColumnIndex": c + 1},
                 "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": FORMAT_TAUX}}},
                 "fields": "userEnteredFormat.numberFormat"}})
+        # une ligne de poste qui ne siege a aucun conseil porte la teinte
+        # sable, sur ses quatre colonnes. Posee AVANT le rose et avant les
+        # couleurs d'instance, qui la recouvrent quand les plages se
+        # rencontrent.
+        for r, c in meta.get("postes", []):
+            requetes.append({"repeatCell": {
+                "range": {"sheetId": sid, "startRowIndex": r, "endRowIndex": r + 1,
+                          "startColumnIndex": c, "endColumnIndex": c + 4},
+                "cell": {"userEnteredFormat": {"backgroundColor": _rvb(COULEUR_POSTE)}},
+                "fields": "userEnteredFormat.backgroundColor"}})
         # ce qui ne fait pas le compte se lit en rose : un total qui ne
         # fait pas l'EPT administratif, une part qu'aucun service ne porte
         for r, c in meta["roses"]:
