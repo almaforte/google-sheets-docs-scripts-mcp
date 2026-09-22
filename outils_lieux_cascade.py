@@ -66,6 +66,7 @@ import datetime
 
 from main import mcp, tolerant
 
+import outils_lieux
 from outils_lieux_socle import (
     DEMIS,
     EDITEURS,
@@ -271,7 +272,7 @@ def _actions(date_iso, cibles, etat, batiments_par_site):
     return actions, inconnus
 
 
-def _deposer_le_rapport(actions, inconnus, date_iso, ecrire, sujet: str = ""):
+def _deposer_le_rapport(actions, inconnus, sujet: str = ""):
     """Ecrit l'onglet technique du rapport, meme a blanc. Le rapport EST
     le livrable : un passage a blanc ne touche rien d'autre."""
     horodatage = _maintenant()
@@ -331,7 +332,7 @@ def lieux_cascade_attributions(date: str = "", ecrire: bool = False, sujet: str 
     etat, colonnes = _attributions_par_creneau(date_iso, site_par_batiment, ref, sujet=sujet)
     cibles, nb_creneaux = _cibles_du_registre(sujet=sujet)
     actions, inconnus = _actions(date_iso, cibles, etat, batiments_par_site)
-    posees = _deposer_le_rapport(actions, inconnus, date_iso, ecrire, sujet=sujet)
+    posees = _deposer_le_rapport(actions, inconnus, sujet=sujet)
 
     fermetures = [a for a in actions if a["action"] == "Fermer"]
     ouvertures = [a for a in actions if a["action"] == "Ouvrir"]
@@ -398,3 +399,36 @@ def lieux_cascade_attributions(date: str = "", ecrire: bool = False, sujet: str 
     resume["lignes_avant"] = len(lignes) - 1
     resume["lignes_apres"] = len(relecture) - 1
     return resume
+
+
+# --------------------------------------------------- pont d'appel
+
+# Le client MCP garde en cache la liste des outils d'une conversation :
+# un outil ajoute au serveur n'y apparait qu'a la conversation suivante.
+# La maison a un pont pour cela, le parametre sujet de lieux_cycle, de la
+# forme « action:nom clef=valeur ». On y greffe la cascade sans toucher a
+# outils_lieux, dont la moindre retouche coute la retransmission de
+# soixante-treize kilo-octets par l'API GitHub.
+_pont_d_origine = outils_lieux._pont
+
+
+def _pont_avec_cascade(texte: str):
+    """« action:cascade ecrire=oui date=2026-09-22 », puis le pont d'origine."""
+    brut = str(texte or "").strip()
+    morceaux = brut.split()
+    if morceaux and morceaux[0].lower() == "cascade":
+        params = {}
+        for m in morceaux[1:]:
+            if "=" in m:
+                k, v = m.split("=", 1)
+                params[k.strip()] = v.strip()
+        ecrire = str(params.get("ecrire", "")).lower() in ("oui", "vrai", "true", "1")
+        return lieux_cascade_attributions(date=params.get("date", ""), ecrire=ecrire)
+    return _pont_d_origine(texte)
+
+
+try:
+    outils_lieux._pont = _pont_avec_cascade
+    print("[lieux cascade] pont greffé : action:cascade", flush=True)
+except Exception as _exc:  # noqa: BLE001
+    print("[lieux cascade] pont non greffé : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
