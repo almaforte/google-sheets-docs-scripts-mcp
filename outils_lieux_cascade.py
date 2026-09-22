@@ -42,6 +42,11 @@ une ville, ou Teletravail, ou Itinerant, ou Non travaille, ou vide :
   4. la meme ville qu'avant : ne rien faire, surtout ne pas rouvrir une
      ligne identique.
 
+Et un cinquieme, trouve au premier passage a blanc : la ville est deja
+prevue par une attribution qui ne commence que plus tard. La cascade le
+dit et n'ouvre rien, sinon elle poserait une seconde ligne pour un lieu
+deja decide.
+
 LA REGLE DE LA VEILLE EST CODEE ICI UNE FOIS POUR TOUTES. Une fin et un
 debut au meme jour font compter deux lieux le meme jour par tout moteur
 qui lit une fenetre de dates. L'erreur a ete faite sur Salibian le
@@ -154,14 +159,12 @@ def _attributions_par_creneau(date_iso: str, site_par_batiment, ref, sujet: str 
     i = {nom: _colonne(entetes, nom) for nom in (
         "Clé", "Collaborateur", "Bâtiment", "Bureau", "Jour", "Demi-journée",
         "Date de début", "Date de fin", "Statut", "Remarque")}
-    etat = {}
+    etat, a_venir = {}, {}
     for r, ligne in enumerate(lignes[1:], start=2):
         if _cellule(ligne, i["Statut"]) not in STATUTS_VIVANTS:
             continue
         debut = _date(_cellule(ligne, i["Date de début"]))
         fin = _date(_cellule(ligne, i["Date de fin"]))
-        if debut and debut > date_iso:
-            continue
         if fin and fin < date_iso:
             continue
         dernier = str(_cellule(ligne, i["Clé"]) or "").split("|")[-1].strip()
@@ -172,15 +175,22 @@ def _attributions_par_creneau(date_iso: str, site_par_batiment, ref, sujet: str 
         batiment = str(_cellule(ligne, i["Bâtiment"]) or "").strip()
         cle = (initiales, _normaliser(_cellule(ligne, i["Jour"])),
                _normaliser(_cellule(ligne, i["Demi-journée"])))
-        etat.setdefault(cle, []).append({
+        fiche = {
             "ligne": r,
             "batiment": batiment,
             "site": site_par_batiment.get(_normaliser(batiment), ""),
             "bureau": str(_cellule(ligne, i["Bureau"]) or "").strip(),
             "statut": _cellule(ligne, i["Statut"]),
+            "debut": debut,
             "colonne_fin": i["Date de fin"],
-        })
-    return etat, i
+        }
+        # Une attribution qui ne commence que plus tard n'est pas en place
+        # aujourd'hui, et elle ne doit pourtant pas etre ignoree : sans
+        # elle, la cascade ouvrirait une seconde ligne pour un lieu deja
+        # prevu. Constate le 22.09.2026 sur Baranova Youliana, attendue a
+        # Lausanne des le 01.03.2027 et deja declaree au registre.
+        (a_venir if (debut and debut > date_iso) else etat).setdefault(cle, []).append(fiche)
+    return etat, a_venir, i
 
 
 def _cibles_du_registre(sujet: str = ""):
@@ -216,7 +226,7 @@ def _cibles_du_registre(sujet: str = ""):
     return cibles, len(creneaux)
 
 
-def _actions(date_iso, cibles, etat, batiments_par_site):
+def _actions(date_iso, cibles, etat, a_venir, batiments_par_site):
     """Les quatre cas, un enregistrement par geste a poser."""
     veille = _veille(date_iso)
     actions, inconnus = [], []
@@ -246,6 +256,19 @@ def _actions(date_iso, cibles, etat, batiments_par_site):
                 continue
             if any(_normaliser(s) == cible for s in sites_en_place):
                 continue  # cas 4, rien a faire
+            prevues = [l for l in a_venir.get(cle, []) if _normaliser(l["site"]) == cible]
+            if prevues and not en_place:
+                # le lieu est deja prevu, plus tard : on le dit, on n'ouvre rien
+                actions.append({
+                    "initiales": initiales, "collaborateur": nom, "jour": jour, "demi": demi,
+                    "registre": valeur, "attributions": "(aucune aujourd'hui)",
+                    "action": "À venir", "batiment": prevues[0]["batiment"],
+                    "effet": prevues[0]["debut"], "ligne": prevues[0]["ligne"],
+                    "remarque": "Attribution déjà prévue dès " + str(prevues[0]["debut"])
+                                + ", le registre l'annonce déjà",
+                    "colonne_fin": None,
+                })
+                continue
             for l in en_place:
                 actions.append({
                     "initiales": initiales, "collaborateur": nom, "jour": jour, "demi": demi,
@@ -329,9 +352,10 @@ def lieux_cascade_attributions(date: str = "", ecrire: bool = False, sujet: str 
     date_iso = _date(date) or _aujourdhui()
     ref = _referentiel_personnes(sujet=sujet)
     site_par_batiment, batiments_par_site = _sites_et_batiments(sujet=sujet)
-    etat, colonnes = _attributions_par_creneau(date_iso, site_par_batiment, ref, sujet=sujet)
+    etat, a_venir, colonnes = _attributions_par_creneau(
+        date_iso, site_par_batiment, ref, sujet=sujet)
     cibles, nb_creneaux = _cibles_du_registre(sujet=sujet)
-    actions, inconnus = _actions(date_iso, cibles, etat, batiments_par_site)
+    actions, inconnus = _actions(date_iso, cibles, etat, a_venir, batiments_par_site)
     posees = _deposer_le_rapport(actions, inconnus, sujet=sujet)
 
     fermetures = [a for a in actions if a["action"] == "Fermer"]
@@ -344,6 +368,7 @@ def lieux_cascade_attributions(date: str = "", ecrire: bool = False, sujet: str 
         "fermetures": len(fermetures),
         "ouvertures": len(ouvertures),
         "ouvertures_sans_batiment": len([a for a in ouvertures if not a["batiment"]]),
+        "deja_prevues_plus_tard": len([a for a in actions if a["action"] == "À venir"]),
         "batiments_sans_ville": len(inconnus),
         "rapport": "https://docs.google.com/spreadsheets/d/" + ID_LIEUX + "/edit",
         "onglet_du_rapport": ONGLET_CASCADE,
