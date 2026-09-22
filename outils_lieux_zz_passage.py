@@ -375,6 +375,20 @@ def lieux_passage_quotidien(sujet: str = ""):
         "référentiel des postes", lieux_referentiel_postes, sujet=sujet)
     resultat["vue_admin"] = _tenter(
         "vue des postes admin", outils_lieux_admin.lieux_vue_admin, publier=True, sujet=sujet)
+    # La cascade du contrat vers les attributions passe A BLANC chaque
+    # matin depuis le 22.09.2026 : elle n'ecrit rien, elle depose son
+    # rapport dans l'onglet « Cascade - Propositions » et compte les
+    # desaccords entre les douze colonnes du registre et les
+    # attributions. Sans ce passage, un desaccord ne se voit jamais, ce
+    # qui est exactement ce qui a laisse le jeudi de Schembari Florine
+    # sur Morges dans Places disponibles.
+    try:
+        import outils_lieux_cascade
+        resultat["cascade"] = _tenter(
+            "cascade du contrat", outils_lieux_cascade.lieux_cascade_attributions,
+            ecrire=False, sujet=sujet)
+    except Exception as exc:  # noqa: BLE001
+        resultat["cascade"] = {"erreur": type(exc).__name__, "detail": str(exc)[:300]}
     return resultat
 
 
