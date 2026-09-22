@@ -702,20 +702,26 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     L'affichage suit celui des vues : horaire du menage, point
     d'interrogation quand l'attribution est encore incertaine.
 
-    Une attribution qui ne commence que plus tard n'est plus ecartee :
-    elle s'affiche « dès 01.11.2026 » (Alberto, 15.09.2026 : « au cas ou
-    il y ait une occupation qui est prevue pour dans le futur, pour pas
-    pietiner dessus »). Deux mots et une date, pas une phrase : la
-    premiere version disait « Occupée au 01.11.2026 par Monica Lourido
-    Garcia », qui deborde sur deux lignes dans une colonne de bureau et
-    se coupe, la hauteur de ligne homologuee n'en portant qu'une
-    (Alberto, le meme jour : « ca ne tient pas dans ce format, trouve un
-    systeme plus lisible, moins de mots »). Le nom se lit dans le
-    registre Attributions ; ce qui compte ici est la date a partir de
-    laquelle le bureau n'est plus libre. Le tri se fait dans l'affichage,
-    pas par un second FILTER : la grille en porte pres de sept cents, et
-    chaque filtre supplementaire se paie a chaque recalcul. La
-    comparaison de date se garde d'une cellule vide, qui en feuille de
+    Une attribution qui ne commence que plus tard n'est pas ecartee
+    (Alberto, 15.09.2026 : « au cas ou il y ait une occupation qui est
+    prevue pour dans le futur, pour pas pietiner dessus »). Elle s'est
+    d'abord affichee « dès 01.11.2026 », sans le nom : la phrase
+    « Occupée au 01.11.2026 par Monica Lourido Garcia » debordait et se
+    coupait dans une ligne d'une seule hauteur. Le 22.09.2026 Alberto a
+    demande les deux, la date ET le nom de la personne qui prend la
+    demi-journee, en cherchant la meilleure solution entre police et
+    taille de cellule. Retenu : le nom sur une ligne, « dès jj.mm.aaaa »
+    sur la ligne suivante de la meme cellule, chaque occupant separe des
+    autres par un retour a la ligne plutot que par une virgule (une
+    virgule entre deux noms se lisait comme un seul « Nom, dès date ») ;
+    la police reste celle de la charte, et la hauteur de la ligne suit le
+    nombre de lignes de texte (voir _requetes_hauteurs dans la charte).
+    Le point d'interrogation d'une attribution incertaine termine
+    l'entree, donc la date quand il y en a une, pour que la regle de mise
+    en forme « finit par ? » continue de le voir. Le tri se fait dans
+    l'affichage, pas par un second FILTER : la grille en porte pres de
+    sept cents, et chaque filtre supplementaire se paie a chaque recalcul.
+    La comparaison de date se garde d'une cellule vide, qui en feuille de
     calcul passe pour plus grande que tout nombre.
     """
     registre = "Attributions!$A$2:$Z"
@@ -724,14 +730,14 @@ def _formule_planification(site_ref: str, bureau_ref: str, jour: str, demi: str)
     def col(nom):
         return 'INDEX(' + registre + ';0;EQUIV("' + nom + '";' + entetes + ';0))'
 
-    affiche = (col("Collaborateur")
-               + '&SI(' + col("Collaborateur") + '="Ménage";" "&' + col("Remarque") + ';"")'
-               + '&SI(REGEXMATCH(' + col("Remarque") + '&"";"' + MOTS_INCERTAINS + '");" ?";"")')
+    nom = (col("Collaborateur")
+           + '&SI(' + col("Collaborateur") + '="Ménage";" "&' + col("Remarque") + ';"")')
+    incertain = '&SI(REGEXMATCH(' + col("Remarque") + '&"";"' + MOTS_INCERTAINS + '");" ?";"")'
     plus_tard = '(' + col("Date de début") + '<>"")*(' + col("Date de début") + '>$D$1)'
-    montre = ('SI(' + plus_tard + ';"dès "&TEXTE(' + col("Date de début")
-              + ';"dd.mm.yyyy");' + affiche + ')')
+    montre = ('SI(' + plus_tard + ';' + nom + '&CAR(10)&"dès "&TEXTE(' + col("Date de début")
+              + ';"dd.mm.yyyy");' + nom + ')' + incertain)
     return (
-        '=ARRAYFORMULA(SIERREUR(TEXTJOIN(", ";VRAI;FILTER(' + montre
+        '=ARRAYFORMULA(SIERREUR(TEXTJOIN(CAR(10);VRAI;FILTER(' + montre
         + ';' + col("Bâtiment") + '=' + site_ref
         + ';' + col("Bureau") + '=' + bureau_ref
         + ';' + col("Jour") + '="' + jour + '"'

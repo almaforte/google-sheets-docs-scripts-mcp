@@ -89,6 +89,12 @@ PASTELS = (
 )
 
 
+# Ce qu'ajoute chaque ligne de texte supplementaire dans une cellule, en
+# pixels : une ligne de Manjari 7 tient dans treize pixels, et une cellule
+# de deux lignes fait 34 pixels, comme dans la vue des postes admin.
+HAUTEUR_LIGNE_DE_TEXTE = 13
+
+
 def _pastel(rang: int) -> str:
     """Pastel du nuancier maison, deux niveaux de clarte.
 
@@ -237,8 +243,21 @@ def _mesures_grille(grille, longueurs=None):
         for c in range(len(ligne)):
             if (r, c) in ignorees:
                 continue
-            longueurs[c] = max(longueurs.get(c, 0), len(str(_cellule(ligne, c))))
+            longueurs[c] = max(longueurs.get(c, 0), _longueur_ligne(_cellule(ligne, c)))
     return longueurs
+
+
+def _lignes_de_texte(valeur):
+    """Les lignes de texte d'une cellule : la Planification separe ses
+    occupants par un retour a la ligne, et pose la date de debut d'une
+    occupation a venir sous le nom (22.09.2026)."""
+    return str(valeur if valeur is not None else "").split("\n")
+
+
+def _longueur_ligne(valeur):
+    """Longueur de la ligne de texte la plus longue d'une cellule : c'est
+    elle qui fixe la largeur de la colonne, pas le texte entier."""
+    return max((len(l) for l in _lignes_de_texte(valeur)), default=0)
 
 
 def _longueur_capitales(mot):
@@ -256,9 +275,15 @@ def _largeur_pixels(longueur):
 
 def _requetes_hauteurs(identifiant: int, grille):
     """Hauteurs homologuees d'une grille : toutes les lignes a la meme
-    hauteur, puis la ligne du nom du site de chaque bloc un peu plus
-    haute. Les hauteurs survivent au nettoyage des formats, d'ou la remise
-    a l'ordinaire de toute la feuille avant de relever les en-tetes."""
+    hauteur, puis chaque ligne dont une cellule porte plusieurs lignes de
+    texte relevee d'autant (la Planification empile ses occupants et pose
+    « dès jj.mm.aaaa » sous le nom d'une occupation a venir, Alberto,
+    22.09.2026 : la date et le nom, en cherchant la meilleure solution
+    entre police et taille de cellule ; la police reste celle de la
+    charte, c'est la cellule qui grandit), puis la ligne du nom du site
+    de chaque bloc un peu plus haute. Les hauteurs survivent au nettoyage
+    des formats, d'ou la remise a l'ordinaire de toute la feuille avant
+    de relever ce qui doit l'etre."""
     def hauteur(r0, r1, pixels):
         return {"updateDimensionProperties": {
             "range": {"sheetId": identifiant, "dimension": "ROWS",
@@ -266,6 +291,12 @@ def _requetes_hauteurs(identifiant: int, grille):
             "properties": {"pixelSize": pixels}, "fields": "pixelSize"}}
 
     requetes = [hauteur(0, max(len(grille), 1), HAUTEUR_LIGNE)]
+    for r, ligne in enumerate(grille):
+        if r == 0:
+            continue
+        lignes_de_texte = max((len(_lignes_de_texte(v)) for v in ligne), default=1)
+        if lignes_de_texte > 1:
+            requetes.append(hauteur(r, r + 1, HAUTEUR_LIGNE + HAUTEUR_LIGNE_DE_TEXTE * (lignes_de_texte - 1)))
     for bloc in _blocs(grille):
         r = bloc["ligne_entete"]
         if 0 <= r < len(grille):
