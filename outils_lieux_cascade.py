@@ -100,7 +100,7 @@ from outils_lieux_socle import (
 ONGLET_CASCADE = "Cascade - Propositions"
 COLONNES_CASCADE = [
     "Horodatage", "Initiales", "Collaborateur", "Jour", "Demi-journée",
-    "Au registre", "Aux attributions", "Action", "Bâtiment proposé",
+    "Ville au contrat", "Bâtiment attribué", "Action", "Bâtiment proposé",
     "Date d'effet", "Ligne d'attributions", "Remarque",
 ]
 
@@ -309,7 +309,7 @@ def _deposer_le_rapport(actions, inconnus, sujet: str = ""):
                       "Bâtiment sans ville au référentiel, aucune proposition"])
     if ONGLET_CASCADE not in _onglets(sujet=sujet):
         _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": [
-            {"addSheet": {"properties": {"title": ONGLET_CASCADE, "hidden": True,
+            {"addSheet": {"properties": {"title": ONGLET_CASCADE,
                                          "gridProperties": {"rowCount": 100,
                                                             "columnCount": len(COLONNES_CASCADE)}}}}]}).execute()
         # Onglet de seule consultation, donc protege des sa creation, avec
