@@ -290,11 +290,19 @@ try:
     def _sans_le_bandeau_structurel(grille):
         """La grille nue, reconnue a sa structure et non a une chaine.
 
-        Une grille porte le bandeau quand ses blocs ont leur colonne des
-        jours decalee de la largeur du bandeau. Le titre pouvant etre
-        vide, il ne sert plus de repere.
+        Une grille porte le bandeau quand TOUS ses blocs ont leur colonne
+        des jours decalee d'au moins la largeur du bandeau : le premier
+        bloc d'une grille nue est toujours en colonne A. Le titre pouvant
+        etre vide, il ne sert plus de repere.
+
+        Piege corrige le 23.09.2026 : un « any » suffisait a un bloc
+        place a droite d'un autre sur la meme ligne, le second immeuble de
+        Morges, pour faire croire au bandeau sur une grille nue ; les deux
+        colonnes Jour et site en etaient retranchees, et la vue perdait sa
+        structure.
         """
-        porte = any(b["colonne_jour"] >= _villes.LARGEUR_BANDEAU for b in _blocs(grille))
+        blocs = _blocs(grille)
+        porte = bool(blocs) and min(b["colonne_jour"] for b in blocs) >= _villes.LARGEUR_BANDEAU
         if not porte:
             return grille
         nue = [list(ligne[_villes.LARGEUR_BANDEAU:]) for ligne in grille]
