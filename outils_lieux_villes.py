@@ -9,17 +9,26 @@ des lieux actifs et des proxs indexees ».
 
 Ce que ce module ajoute aux vues, sans rien saisir a la main :
 
-  colonne A : un bloc teal par ville, le nom incline sur la moitie haute
-      depuis la ligne des etages, la vignette iconique sur la moitie
-      basse, quand la colonne Image de Referentiel - Villes porte une
-      adresse.
+  colonne A : un bloc teal par ville, le nom incline vers le haut a
+      droite sur la moitie haute depuis la ligne des etages, la vignette
+      iconique sur la moitie basse, quand la colonne Image de
+      Referentiel - Villes porte une adresse.
   colonne B : les referents de proximite de LIEU de cette ville. Un titre
       dore sur les trois lignes de tete, puis un corps creme ou se lisent
-      le nom dans l'ordre naturel et les jours de presence groupes par
-      portee. Le participe s'accorde au sexe.
+      le nom, EN GRAS, dans l'ordre naturel, et les jours de presence
+      groupes par portee. Le participe s'accorde au sexe.
 
-Une bande sans ville, le teletravail, ne recoit rien du tout : Alberto,
-23.09.2026, « home office, pas de bloc ».
+Une bande sans ville, le teletravail, ne recoit pas de bloc : Alberto,
+23.09.2026, « home office, pas de bloc ». Elle recoit tout de meme le
+filet gris a gauche de sa grille, la charte voulant que le contour d'un
+grand bloc soit toujours clos.
+
+LES VIGNETTES SONT UNE DONNEE, PAS DU CODE. Le pictogramme d'une ville
+est le fichier dont la colonne Image de Referentiel - Villes porte
+l'adresse. Deposer une autre image dans le dossier Almaval - Images des
+villes et coller son lien dans cette colonne suffit a la changer : le
+serveur l'ouvre en lecture par lien et la pose en image de cellule au
+passage suivant. Aucune adresse n'est ecrite dans ce module.
 
 D'ou viennent les trois informations, et pourquoi elles descendent seules
 
@@ -530,7 +539,8 @@ def _poser_les_vignettes(cibles):
     L'API des feuilles ne sait pas en creer, Apps Script si.
 
     L'echec ne fait pas echouer la generation : la vue reste juste, la
-    vignette manque, et la raison part au journal du serveur.
+    vignette manque, et la raison part au journal du serveur. La reprise
+    en cas de reponse inattendue vit dans outils_lieux_zzz_vignettes.
     """
     if not cibles:
         return {"posees": 0}
@@ -627,7 +637,7 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
     « vignette » pour la colonne de gauche, « entete » et « creme » pour
     celle des referents. Les images sont {(ligne, colonne): adresse}.
     """
-    valeurs, fusions, images, infos, plages = {}, [], {}, [], []
+    valeurs, fusions, images, infos, plages, gras, nus = {}, [], {}, [], [], [], []
     for bande in _bandes(grille):
         ville = None
         for site in bande["sites"]:
@@ -665,19 +675,31 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             # fait grandir sa PREMIERE ligne pour contenir tout son texte,
             # ce qui deformait la bande.
             gens = referents.get(_normaliser(ville["nom"]), [])
-            bloc = []
+            bloc, noms = [], []
             for personne in gens:
                 if bloc:
                     bloc.append("")
-                bloc.extend(_lignes_du_referent(personne, ville["nom"]))
+                    noms.append(False)
+                lignes_de_la_personne = _lignes_du_referent(personne, ville["nom"])
+                bloc.extend(lignes_de_la_personne)
+                # La premiere ligne d'une personne est son nom : Alberto,
+                # 23.09.2026, « le nom des prox en bold ».
+                noms.extend([j == 0 for j in range(len(lignes_de_la_personne))])
             for i, texte in enumerate(bloc):
                 if texte and haut + i <= bas:
                     valeurs[(haut + i, COLONNE_REFERENT)] = texte
+                    if noms[i]:
+                        gras.append((haut + i, COLONNE_REFERENT))
             fusions.append((haut, bas + 1, COLONNE_REFERENT, "creme"))
         else:
             # Alberto, 23.09.2026 : « home office, pas de bloc ». Une bande
-            # sans ville ne recoit rien du tout, ni couleur, ni titre, ni
-            # contour : les deux colonnes de tete y restent blanches.
+            # sans ville ne recoit ni couleur, ni titre, ni vignette : les
+            # deux colonnes de tete y restent blanches. Le 23.09.2026 il a
+            # precise la seule exception : « sur le home office manque la
+            # cloture du contour, gauche, en charte on clot toujours les
+            # contours des grands blocs ». Le bloc est donc ferme a gauche,
+            # sur la premiere colonne de la grille.
+            nus.append((bande["ligne_etages"], bas + 1))
             gens = []
 
         infos.append({
@@ -685,7 +707,7 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             "referents": [r.get("appellation") or r["nom"] for r in gens],
             "image": bool(ville and ville.get("image")),
         })
-    return valeurs, fusions, images, infos, plages
+    return valeurs, fusions, images, infos, plages, gras, nus
 
 
 def _grille_avec_bandeau(grille, sujet: str = ""):
@@ -705,16 +727,17 @@ def _grille_avec_bandeau(grille, sujet: str = ""):
         titre = _cellule(grille[0], 0) if grille[0] else ""
         decalee[0] = [titre] + [""] * (LARGEUR_BANDEAU + max(0, len(grille[0]) - 1))
 
-    valeurs, fusions, images, infos, plages = _contenu_du_bandeau(
+    valeurs, fusions, images, infos, plages, gras, nus = _contenu_du_bandeau(
         decalee, villes, batiments, referents)
     for (r, c), texte in valeurs.items():
         while len(decalee[r]) <= c:
             decalee[r].append("")
         decalee[r][c] = texte
-    return decalee, fusions, images, infos, plages
+    return decalee, fusions, images, infos, plages, gras, nus
 
 
-def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
+def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None,
+                      gras=None, nus=None):
     """Mise en forme du bandeau, d'apres les retouches d'Alberto.
 
     La colonne de gauche est un bloc teal par ville : le nom en blanc et
@@ -730,6 +753,8 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
     restent blancs.
     """
     plages = plages or []
+    gras = gras or []
+    nus = nus or []
     # Les deux colonnes du bandeau sont d'abord defusionnees : chez les
     # patients, la publication vient d'y recopier les fusions de la Vue
     # actuelle, et une fusion qui en chevauche une autre est refusee.
@@ -774,7 +799,10 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
             "backgroundColor": _rvb(TEAL),
             "horizontalAlignment": "CENTER",
             "verticalAlignment": "MIDDLE",
-            "textRotation": {"angle": -45},
+            # L'inclinaison monte vers la droite : Alberto, 23.09.2026,
+            # « le nom de ville incline vers le haut a droite ». L'API
+            # compte les angles positifs vers le haut.
+            "textRotation": {"angle": 45},
             "textFormat": {"fontFamily": POLICE, "fontSize": TAILLE_NOM_DE_VILLE,
                            "bold": True, "foregroundColor": _rvb("#ffffff")},
         }, ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
@@ -807,6 +835,17 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
                 "userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,"
                 "userEnteredFormat.textFormat"))
 
+    # Le nom de chaque referent en gras, sur le fond creme deja pose :
+    # Alberto, 23.09.2026, « le nom des prox en bold ». Une seule
+    # propriete est touchee, le reste du format creme demeure.
+    for ligne, colonne in gras:
+        requetes.append({"repeatCell": {
+            "range": {"sheetId": identifiant, "startRowIndex": ligne, "endRowIndex": ligne + 1,
+                      "startColumnIndex": colonne, "endColumnIndex": colonne + 1},
+            "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+            "fields": "userEnteredFormat.textFormat.bold",
+        }})
+
     # Le contour : le meme filet gris moyen que la charte pose autour de
     # chaque journee, ici autour du bloc de la ville et autour de la
     # colonne des referents. Alberto l'a ajoute sur ses retouches du
@@ -820,6 +859,19 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
                           "startColumnIndex": colonne, "endColumnIndex": colonne + 1},
                 "top": filet, "bottom": filet, "left": filet, "right": filet,
             }})
+
+    # La cloture des bandes sans ville. Le home office ne recoit pas de
+    # bloc, donc pas de filet a gauche de sa grille : son grand bloc
+    # restait ouvert de ce cote. Alberto, 23.09.2026 : « en charte,
+    # toujours clore les contours des grands blocs ». Le filet est donc
+    # pose sur le bord gauche de la premiere colonne de la grille.
+    for debut, fin in nus:
+        requetes.append({"updateBorders": {
+            "range": {"sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
+                      "startColumnIndex": LARGEUR_BANDEAU,
+                      "endColumnIndex": LARGEUR_BANDEAU + 1},
+            "left": filet,
+        }})
 
     # Les largeurs des deux colonnes sont posees par _largeurs_de_la_vue
     # pour la Vue actuelle, et ici pour la copie publiee.
@@ -961,11 +1013,12 @@ def _habiller_la_vue(sujet: str = ""):
     grille = _sans_le_bandeau(grille)
     grille, retirees = _sans_bandes_inactives(grille, sujet=sujet)
     _rendre_les_images_lisibles(_villes(sujet=sujet))
-    sortie, fusions, images, infos, plages = _grille_avec_bandeau(grille, sujet=sujet)
+    sortie, fusions, images, infos, plages, gras, nus = _grille_avec_bandeau(
+        grille, sujet=sujet)
     _ol._ecrire_grille(ONGLET_VUE, sortie, sujet=sujet)
     sid = _onglets(sujet=sujet)[ONGLET_VUE]["sheetId"]
     requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(
-        sid, fusions, images, plages)
+        sid, fusions, images, plages, gras, nus)
     if requetes:
         _feuilles(sujet).batchUpdate(
             spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
@@ -1044,10 +1097,10 @@ try:
         villes = _villes(sujet=sujet)
         batiments = _batiments(sujet=sujet)
         referents = _referents_de_lieu(sujet=sujet)
-        _, fusions, images, infos, plages = _contenu_du_bandeau(
+        _, fusions, images, infos, plages, gras, nus = _contenu_du_bandeau(
             vue, villes, batiments, referents)
         sid = _onglets(ID_PATIENTS, sujet=sujet)[ONGLET_PATIENTS]["sheetId"]
-        requetes = _requetes_bandeau(sid, fusions, plages=plages)
+        requetes = _requetes_bandeau(sid, fusions, plages=plages, gras=gras, nus=nus)
         if requetes:
             _feuilles(sujet).batchUpdate(
                 spreadsheetId=ID_PATIENTS, body={"requests": requetes}).execute()
