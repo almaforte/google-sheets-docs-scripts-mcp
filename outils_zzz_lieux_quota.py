@@ -19,7 +19,7 @@ Deux defauts se sont additionnes.
 
   2. UN ECHEC MUET. Le decorateur tolerant de main.py rend
      {"erreur": "HTTP 429", "detail": ...} au lieu de lever. Les blocs
-     appeles a l'interieur du passage transitoire, dont le retour vers
+     appeles a l'interieur du passage du registre, dont le retour vers
      l'effectif et l'organigramme, ont donc echoue en silence : le
      passage a continue comme si tout allait bien et le Journal n'a
      garde aucune trace. Seul le courriel du matin, qui relit le
@@ -202,8 +202,8 @@ def _echecs_du_passage(resultat):
 
 _passage_d_origine = None
 try:
-    import outils_lieux_transitoire
-    _passage_d_origine = outils_lieux_transitoire.lieux_passage_quotidien
+    import outils_lieux_registre
+    _passage_d_origine = outils_lieux_registre.lieux_passage_quotidien
 except Exception as _exc:  # noqa: BLE001
     print("[lieux quota] passage quotidien introuvable : "
           + type(_exc).__name__ + " " + str(_exc)[:160], flush=True)
@@ -233,13 +233,13 @@ def lieux_passage_quotidien(sujet: str = ""):
 _remplace = False
 if _passage_d_origine is not None:
     try:
-        _remplace = outils_lieux_transitoire._remplacer_outil(
+        _remplace = outils_lieux_registre._remplacer_outil(
             "lieux_passage_quotidien", lieux_passage_quotidien)
         if _remplace:
             # Le routeur « action:quotidien » de lieux_cycle appelle le nom tel
-            # qu'il vit dans les globales de transitoire : il faut donc l'y
+            # qu'il vit dans les globales du registre : il faut donc l'y
             # remplacer aussi.
-            outils_lieux_transitoire.lieux_passage_quotidien = tolerant(lieux_passage_quotidien)
+            outils_lieux_registre.lieux_passage_quotidien = tolerant(lieux_passage_quotidien)
     except Exception as _exc:  # noqa: BLE001
         print("[lieux quota] passage quotidien non enveloppé : "
               + type(_exc).__name__ + " " + str(_exc)[:160], flush=True)
