@@ -54,7 +54,7 @@ import re as _re
 import outils_lieux as _ol
 import outils_lieux_socle as _socle
 
-from main import _drive, mcp, tolerant
+from main import _drive, mcp, run_web_app, tolerant
 from outils_lieux_socle import (
     BATIMENT_ADMINISTRATION,
     DEMIS,
@@ -98,6 +98,14 @@ COLONNE_REFERENT = 1
 ENTETE_BANDEAU = "Référent.s de proximité par lieu"
 LARGEUR_COLONNE_VILLE = 64
 LARGEUR_COLONNE_REFERENT = 140
+
+# Le deploiement versionne du projet « Almaval - RH - Onboarding des
+# collaborateurs », qui porte le fichier « 60 Vignettes des villes ».
+# L'adresse ne change pas quand une nouvelle version y est publiee ;
+# le deploiement de tete, lui, a deja rendu 403 le 23.09.2026.
+APPLICATION_WEB_RH = ("https://script.google.com/macros/s/"
+                      "AKfycbxrLXnSYB3QrsALd1walJ-tdwWpKMIAjompZUiUKY-ZjRHPaUiChLv5P3fpRGsY1V-H"
+                      "/exec")
 
 
 # ------------------------------------------------------------- referentiels
@@ -419,6 +427,51 @@ def _rendre_les_images_lisibles(villes):
     return ouvertes
 
 
+def _cibles_des_vignettes(images, classeur: str, onglet: str):
+    """Traduit les positions calculees en cibles pour Apps Script.
+
+    Les images sont reperees en lignes et colonnes comptees a partir de
+    zero ; une feuille les compte a partir de un.
+    """
+    return [{"classeur": classeur, "onglet": onglet,
+             "ligne": r + 1, "colonne": c + 1, "url": adresse,
+             "titre": "Vignette de la ville"}
+            for (r, c), adresse in sorted(images.items())]
+
+
+def _poser_les_vignettes(cibles):
+    """Fait poser les vignettes en image de cellule par le projet RH.
+
+    Pourquoi passer par Apps Script. Ce domaine refuse aux formules d'une
+    feuille d'aller chercher une adresse externe : une formule IMAGE rend
+    « #REF! (Please use a desktop web browser to allow access to fetch
+    data from external urls.) », et l'autorisation se donnerait lecteur
+    par lecteur. Une image de cellule, elle, est telechargee une fois et
+    conservee dans le classeur : plus aucune autorisation a la lecture.
+    L'API des feuilles ne sait pas en creer, Apps Script si.
+
+    L'echec ne fait pas echouer la generation : la vue reste juste, la
+    vignette manque, et la raison part au journal du serveur.
+    """
+    if not cibles:
+        return {"posees": 0}
+    appel = run_web_app.fn if hasattr(run_web_app, "fn") else run_web_app
+    try:
+        retour = appel(APPLICATION_WEB_RH, payload={"action": "poserLesVignettes",
+                                                    "cibles": cibles})
+    except Exception as _e:  # noqa: BLE001
+        print("[lieux villes] vignettes non posees : "
+              + type(_e).__name__ + " " + str(_e)[:200], flush=True)
+        return {"posees": 0, "erreur": type(_e).__name__}
+    reponse = retour.get("reponse") if isinstance(retour, dict) else None
+    if not isinstance(reponse, dict):
+        print("[lieux villes] vignettes, reponse inattendue : " + str(retour)[:200], flush=True)
+        return {"posees": 0, "erreur": "reponse inattendue"}
+    if reponse.get("manquees"):
+        print("[lieux villes] vignettes manquees : " + str(reponse["manquees"])[:300], flush=True)
+    return {"posees": reponse.get("posees", 0), "manquees": reponse.get("manquees", [])}
+
+
 def _sans_bandes_inactives(grille, sujet: str = ""):
     """Retire de la grille les bandes dont le batiment n'est plus actif.
 
@@ -563,8 +616,12 @@ def _grille_avec_bandeau(grille, sujet: str = ""):
     return decalee, fusions, images, infos
 
 
-def _requetes_bandeau(identifiant: int, fusions, images):
-    """Mise en forme du bandeau : ville en teal, referents en tete doree."""
+def _requetes_bandeau(identifiant: int, fusions, images=None):
+    """Mise en forme du bandeau : ville en teal, referents en tete doree.
+
+    Les images ne sont plus posees par une formule, le parametre n'est
+    garde que pour la compatibilite des appels.
+    """
     requetes = []
     for debut, fin, colonne in fusions:
         requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
@@ -626,14 +683,9 @@ def _requetes_bandeau(identifiant: int, fusions, images):
                   "startIndex": COLONNE_REFERENT, "endIndex": COLONNE_REFERENT + 1},
         "properties": {"pixelSize": LARGEUR_COLONNE_REFERENT}, "fields": "pixelSize",
     }})
-    for (r, c), adresse in images.items():
-        requetes.append({"updateCells": {
-            "range": {"sheetId": identifiant, "startRowIndex": r, "endRowIndex": r + 1,
-                      "startColumnIndex": c, "endColumnIndex": c + 1},
-            "rows": [{"values": [{"userEnteredValue": {
-                "formulaValue": '=IMAGE("' + str(adresse).replace('"', "") + '"; 1)'}}]}],
-            "fields": "userEnteredValue",
-        }})
+    # Les vignettes ne sont PAS posees ici : une formule IMAGE rendrait
+    # #REF! sur ce domaine. Elles sont posees en image de cellule par
+    # _poser_les_vignettes, apres l'ecriture de la grille.
     return requetes
 
 
@@ -702,13 +754,16 @@ try:
         requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(sid, fusions, images)
         if requetes:
             _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
+        vignettes = _poser_les_vignettes(
+            _cibles_des_vignettes(images, ID_LIEUX, onglet))
         _journaliser([[_maintenant(), onglet, "Génération", date_iso, "", str(poses), "Terminé",
                        "cellules occupées au " + _jolie_date(date_iso)
                        + ", bandeau des villes : " + str(len(infos)) + " bandes"
                        + (", bandes retirées : " + ", ".join(retirees) if retirees else "")]],
                      sujet=sujet)
         return {"onglet": onglet, "date": date_iso, "cellules_occupees": poses,
-                "lignes": len(sortie), "bandes": infos, "bandes_retirees": retirees}
+                "lignes": len(sortie), "bandes": infos, "bandes_retirees": retirees,
+                "vignettes": vignettes}
 
     _ol._generer_vue = _generer_vue_avec_bandeau
     print("[lieux villes] bandeau greffé sur la Vue actuelle", flush=True)
@@ -736,11 +791,41 @@ try:
         referents = _referents_de_lieu(sujet=sujet)
         _, fusions, images, infos = _contenu_du_bandeau(vue, villes, batiments, referents)
         sid = _onglets(ID_PATIENTS, sujet=sujet)[ONGLET_PATIENTS]["sheetId"]
-        requetes = _requetes_bandeau(sid, fusions, images)
+        requetes = _requetes_bandeau(sid, fusions)
         if requetes:
             _feuilles(sujet).batchUpdate(
                 spreadsheetId=ID_PATIENTS, body={"requests": requetes}).execute()
-        return {"bandeau": True, "bandes": infos}
+        vignettes = _poser_les_vignettes(
+            _cibles_des_vignettes(images, ID_PATIENTS, ONGLET_PATIENTS))
+        return {"bandeau": True, "bandes": infos, "vignettes": vignettes}
+
+    def _publier_avec_bandeau(confirmer: bool = False, sujet: str = ""):
+        """La publication emporte le bandeau, ses couleurs et ses vignettes.
+
+        La copie vers Almaval - Patients recopie les valeurs et les fusions,
+        puis rejoue la charte des grilles, qui ne connait pas le bandeau :
+        sans cette reprise, la colonne de la ville arriverait sans son fond
+        teal et sans sa vignette.
+        """
+        retour = _publier_amont(confirmer=confirmer, sujet=sujet)
+        if not confirmer:
+            return retour
+        if isinstance(retour, dict) and retour.get("erreur"):
+            return retour
+        reprise = _reposer_le_bandeau_chez_patients(sujet=sujet)
+        if isinstance(retour, dict):
+            retour["bandeau"] = reprise
+        return retour
+
+    # Un outil deja enregistre ne se remplace pas en ecrasant l'attribut du
+    # module : le serveur garde l'objet d'origine. Le registre des lieux
+    # porte deja le geste exact, employe pour le passage quotidien.
+    import outils_lieux_registre as _registre
+    _pose = _registre._remplacer_outil("lieux_publier_vers_patients", _publier_avec_bandeau)
+    if _pose:
+        _ol.lieux_publier_vers_patients = tolerant(_publier_avec_bandeau)
+    print("[lieux villes] publication vers les patients "
+          + ("greffée" if _pose else "NON greffée") + " : bandeau et vignettes", flush=True)
 except Exception as _exc:  # noqa: BLE001
     print("[lieux villes] reprise du bandeau non préparée : "
           + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
