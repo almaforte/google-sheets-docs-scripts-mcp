@@ -374,7 +374,13 @@ def lieux_consolider_attributions(sujet: str = ""):
 @mcp.tool()
 @tolerant
 def lieux_charte_attributions(sujet: str = ""):
-    """Charte et protections d'Attributions en mode transitoire. Idempotent.
+    """Charte et protections de l'onglet Attributions. Idempotent.
+
+    SEULE FONCTION QUI ECRIT CET ONGLET depuis le 23.09.2026. La charte
+    generale, lieux_poser_la_charte, ne le touche plus du tout : les deux
+    se contredisaient, celle-la refermant les six colonnes que celle-ci
+    ouvre, et le droit de Clement Berger disparaissait a chaque passage.
+    Arbitrage d'Alberto du 23.09.2026 : le mode ouvert devient la regle.
 
     Ouvertes a la saisie, en jaune : Collaborateur, Bureau, Bâtiment,
     Jour, Demi-journée, Date de début, Remarque. Date de fin en saumon :
@@ -382,8 +388,7 @@ def lieux_charte_attributions(sujet: str = ""):
     manuelle primant. Au moteur, en violet et protegees : Clé, Identifiant
     du bureau, Statut, Fin selon registre RH, Origine. Listes bloquantes
     tirees de Listes et du referentiel, dates valides, statuts colores,
-    origine Main en bleu pale. A relancer apres lieux_poser_la_charte,
-    qui remet l'onglet dans son etat d'avant le 14.09.2026.
+    origine Main en bleu pale.
     """
     entetes = _entetes(sujet=sujet)
     p = _onglets(sujet=sujet)[ONGLET_ATTRIBUTIONS]
@@ -490,7 +495,7 @@ def lieux_charte_attributions(sujet: str = ""):
                                         "Date de début", "Date de fin", "Remarque")]
     requetes.append({"addProtectedRange": {"protectedRange": {
         "range": {"sheetId": sid},
-        "description": ("Registre en mode transitoire : Clé, Identifiant du bureau, Statut, "
+        "description": ("Registre des attributions : Clé, Identifiant du bureau, Statut, "
                         "Fin selon registre RH et Origine restent au moteur"),
         "warningOnly": False, "requestingUserCanEdit": True,
         # Clement Berger est editeur de ce seul onglet depuis le
