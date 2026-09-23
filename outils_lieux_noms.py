@@ -56,7 +56,7 @@ table connait.
 Le module se charge apres outils_lieux, outils_lieux_admin et
 outils_lieux_charte (ordre alphabetique de bootstrap), donc apres le
 socle qu'ils importent ; le socle, la charte, outils_lieux, le mode
-transitoire et la vue admin l'importent paresseusement, a l'appel, pour
+le registre et la vue admin l'importent paresseusement, a l'appel, pour
 ne creer aucun import circulaire.
 """
 
@@ -392,7 +392,7 @@ def lieux_migrer_cles_initiales(sujet: str = ""):
     effet quand tout est deja en initiales.
     """
     import datetime
-    import outils_lieux_transitoire as transitoire
+    import outils_lieux_registre as registre
 
     avant = _lire(ONGLET_ATTRIBUTIONS_LOCAL, sujet=sujet)
     nb_avant = sum(1 for l in avant[1:] if any(str(c).strip() for c in l))
@@ -412,7 +412,7 @@ def lieux_migrer_cles_initiales(sujet: str = ""):
             "properties": {"sheetId": titres[archive], "hidden": True}, "fields": "hidden"}}]}).execute()
 
     listes = lieux_poser_listes_occupants(sujet=sujet)
-    consolidation = transitoire.lieux_consolider_attributions(sujet=sujet)
+    consolidation = registre.lieux_consolider_attributions(sujet=sujet)
 
     apres = _lire(ONGLET_ATTRIBUTIONS_LOCAL, sujet=sujet)
     tetes = apres[0]
