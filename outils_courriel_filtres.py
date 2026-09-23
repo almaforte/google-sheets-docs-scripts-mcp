@@ -25,7 +25,9 @@ compteurs sont rendus.
 Action ponctuelle du 23.09.2026, sur le seul service web-contact : pose du
 filtre des questions de la chaine des rapports dans contact@ et rangement
 des messages deja recus. Idempotente (ne recree pas un filtre existant),
-journalisee sous le prefixe [filtres gmail]. A retirer une fois lue.
+retentee toutes les dix minutes pendant 48 heures tant que la delegation
+ne porte pas les portees Gmail, journalisee sous le prefixe
+[filtres gmail]. A retirer une fois reussie.
 """
 
 import os
@@ -267,9 +269,8 @@ def _ligne(t: str) -> None:
     print("[filtres gmail] " + t, flush=True)
 
 
-def _action_23092026() -> None:
-    if os.environ.get("IMPERSONATE_USER", "").strip().lower() != "contact@almaval.ch":
-        return
+def _action_23092026() -> bool:
+    """Rend True quand le filtre est pose et le premier courriel range."""
     compte = "contact@almaval.ch"
     etiquette = "Rapports patients/Lauréline"
     try:
@@ -280,17 +281,28 @@ def _action_23092026() -> None:
             objet="Rapports - questions à trancher pour Lauréline",
         )
         _ligne("filtre " + str(r))
-    except Exception as exc:  # noqa: BLE001
-        _ligne("filtre REFUSE : " + str(exc)[:400])
-    try:
         lab, _ = _etiquette_par_nom(compte, etiquette, creer=False)
-        if lab:
-            n = _etiqueter(
-                compte, 'from:(gestion@almaval.ch) subject:("questions à trancher")', lab["id"], 20
-            )
-            _ligne("rangement du premier courriel : " + str(n) + " message(s)")
+        n = _etiqueter(
+            compte, 'from:(gestion@almaval.ch) subject:("questions à trancher")', lab["id"], 20
+        )
+        _ligne("rangement du premier courriel : " + str(n) + " message(s)")
+        return True
     except Exception as exc:  # noqa: BLE001
-        _ligne("rangement REFUSE : " + str(exc)[:400])
+        _ligne("REFUSE, nouvel essai dans dix minutes : " + str(exc)[:300])
+        return False
 
 
-threading.Thread(target=_action_23092026, daemon=True).start()
+def _boucle_23092026() -> None:
+    """Retente toutes les dix minutes pendant 48 heures : des que la portee
+    est ajoutee a la delegation, le filtre se pose sans redeploiement."""
+    import time
+
+    if os.environ.get("IMPERSONATE_USER", "").strip().lower() != "contact@almaval.ch":
+        return
+    for _ in range(288):
+        if _action_23092026():
+            return
+        time.sleep(600)
+
+
+threading.Thread(target=_boucle_23092026, daemon=True).start()
