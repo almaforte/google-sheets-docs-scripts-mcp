@@ -211,3 +211,42 @@ def lire_protections(spreadsheet_id: str, onglet: str = "", adresse: str = "",
     if avertissement:
         resultat["avertissement"] = avertissement
     return resultat
+
+
+# ----------------------------------------------------------------- pont
+# Un outil neuf n'apparait dans la liste du client qu'a la conversation
+# suivante : la liste est mise en cache et RefreshMcpTools ne la rouvre
+# pas. Le meme constat avait ete fait le 22.09.2026 pour la cascade. La
+# maison contourne par un pont : lieux_cycle, appele avec un sujet de la
+# forme « action:nom clef=valeur », route vers l'outil voulu.
+#
+# Le pont se chaine. outils_lieux_cascade a deja remplace _pont ; en
+# capturant sa valeur courante a l'import, chaque module ajoute son
+# action sans effacer celle du precedent. L'ordre alphabetique du
+# chargement garantit que la cascade est passee avant.
+try:
+    import outils_lieux
+
+    _pont_precedent = outils_lieux._pont
+
+    def _pont_avec_protections(texte: str):
+        brut = str(texte or "").strip()
+        morceaux = brut.split()
+        if morceaux and morceaux[0].lower() == "protections":
+            params = {}
+            for m in morceaux[1:]:
+                if "=" in m:
+                    clef, valeur = m.split("=", 1)
+                    params[clef.strip()] = valeur.strip()
+            return lire_protections(
+                spreadsheet_id=params.get("classeur", ""),
+                onglet=params.get("onglet", "").replace("_", " "),
+                adresse=params.get("adresse", ""),
+            )
+        return _pont_precedent(texte)
+
+    outils_lieux._pont = _pont_avec_protections
+except Exception:  # noqa: BLE001
+    # Le module des protections ne depend pas du moteur des lieux : s'il
+    # n'est pas la, l'outil reste appelable normalement, sans pont.
+    pass
