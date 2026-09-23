@@ -14,8 +14,8 @@ Ce que ce module ajoute aux vues, sans rien saisir a la main :
       Referentiel - Villes porte une adresse.
   colonne B : les referents de proximite de LIEU de cette ville. Sous un
       titre dore, sur fond creme, un bloc par personne : son nom dans
-      l'ordre naturel, puis les jours ou elle est sur place, chacun avec
-      sa portee. Le participe s'accorde au sexe.
+      l'ordre naturel, puis ses jours de presence groupes par portee. Le
+      participe s'accorde au sexe.
 
 D'ou viennent les trois informations, et pourquoi elles descendent seules
 
@@ -42,7 +42,9 @@ ecrite : _generer_vue, qu'emploie lieux_vue_actuelle, et
 lieux_vue_du_jour, qu'emploie le passage du matin et qui reconstruit la
 grille pour son propre compte afin d'y meler le ponctuel des agendas de
 salles. Les deux appellent le meme _habiller_la_vue, qui reprend ce qui
-vient d'etre ecrit : aucun corps de generateur n'est recopie ici.
+vient d'etre ecrit : aucun corps de generateur n'est recopie ici. Il
+enveloppe enfin _appliquer_largeurs, qui sans cela effacerait a chaque
+passage les largeurs du bandeau.
 
 Ce que le bandeau ne fait PAS. Il ne parait ni dans Propositions, la
 surface de saisie, ni dans Planification, dont la cellule de date vit en
@@ -355,36 +357,59 @@ def _referents_de_lieu(sujet: str = ""):
     return par_ville
 
 
-def _portee_du_jour(demis_du_jour) -> str:
-    """« toute la journée », « le matin » ou « l'après-midi »."""
-    if len(demis_du_jour) >= len(DEMIS):
-        return "toute la journée"
-    return "le matin" if demis_du_jour[0] == DEMIS[0] else "l'après-midi"
+def _jours_par_portee(personne, ville_nom: str):
+    """Les jours de presence dans cette ville, groupes par portee.
 
-
-def _lignes_du_referent(personne, ville_nom: str):
-    """Le bloc d'un referent, ligne a ligne, tel qu'Alberto l'a dessine.
-
-    Le nom dans l'ordre naturel, une ligne vide, puis les jours de
-    presence dans cette ville, chacun avec sa portee. Le participe
-    s'accorde : « Présente les » pour une femme, « Présent les » pour un
-    homme, la forme masculine a defaut de sexe connu.
-
-    Rendu ligne a ligne et non en un seul texte : chaque ligne ira dans
-    sa propre cellule. Une cellule fusionnee verticalement fait grandir sa
-    PREMIERE ligne pour contenir tout le texte, ce qui deformait la bande.
+    Rend une liste de couples (portee, jours), dans l'ordre : la journee
+    entiere d'abord, puis les matins, puis les apres-midi.
     """
-    lignes = [personne.get("appellation") or personne["nom"]]
-    jours = []
+    par_portee = {}
     for jour in JOURS:
         demis = [demi for demi in DEMIS
                  if _normaliser(personne["demis"].get((jour, demi), "")) == _normaliser(ville_nom)]
-        if demis:
-            jours.append(jour + ", " + _portee_du_jour(demis))
-    if jours:
+        if not demis:
+            continue
+        if len(demis) >= len(DEMIS):
+            portee = "toute la journée"
+        elif demis[0] == DEMIS[0]:
+            portee = "le matin"
+        else:
+            portee = "l'après-midi"
+        par_portee.setdefault(portee, []).append(jour)
+    return [(portee, par_portee[portee])
+            for portee in ("toute la journée", "le matin", "l'après-midi")
+            if portee in par_portee]
+
+
+def _enumeration(jours):
+    """« Mardi, mercredi et jeudi » : le premier en capitale, et « et »."""
+    mots = [jours[0]] + [j.lower() for j in jours[1:]]
+    if len(mots) == 1:
+        return mots[0]
+    return ", ".join(mots[:-1]) + " et " + mots[-1]
+
+
+def _lignes_du_referent(personne, ville_nom: str):
+    """Le bloc d'un referent, ligne a ligne.
+
+    Le nom dans l'ordre naturel, une ligne vide, puis une ligne par
+    portee de presence, les jours groupes. Alberto, 23.09.2026 : un jour
+    par ligne avec « toute la journée » repete a chaque fois se lisait
+    comme une repetition. Le participe s'accorde : « Présente les » pour
+    une femme, « Présent les » pour un homme, la forme masculine a defaut
+    de sexe connu.
+
+    Rendu ligne a ligne et non en un seul texte : chaque ligne ira dans sa
+    propre cellule. Une cellule fusionnee verticalement fait grandir sa
+    PREMIERE ligne pour contenir tout le texte, ce qui deformait la bande.
+    """
+    lignes = [personne.get("appellation") or personne["nom"]]
+    groupes = _jours_par_portee(personne, ville_nom)
+    if groupes:
         lignes.append("")
         lignes.append("Présente les" if personne.get("sexe") == "F" else "Présent les")
-        lignes.extend(jours)
+        for portee, jours in groupes:
+            lignes.append(_enumeration(jours) + ", " + portee)
     return lignes
 
 
@@ -762,6 +787,8 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
                 "userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,"
                 "userEnteredFormat.textFormat"))
 
+    # Les largeurs des deux colonnes sont posees par _largeurs_de_la_vue
+    # pour la Vue actuelle, et ici pour la copie publiee.
     requetes.append({"updateDimensionProperties": {
         "range": {"sheetId": identifiant, "dimension": "COLUMNS",
                   "startIndex": COLONNE_VILLE, "endIndex": COLONNE_VILLE + 1},
@@ -795,6 +822,47 @@ def _sans_le_bandeau(grille):
     return nue
 
 
+def _requetes_largeurs_de_la_vue(sujet: str = ""):
+    """Repose les largeurs de la Vue actuelle, bandeau compris.
+
+    Pourquoi. _appliquer_largeurs, de la charte, mesure les colonnes sur
+    les trois grilles du classeur et pose les MEMES largeurs sur chacune,
+    pour qu'elles se superposent. Depuis que la Vue actuelle porte deux
+    colonnes de plus, ces largeurs y tombent decalees de deux rangs : la
+    colonne des jours prend celle du bandeau, et le nom de la ville, grand
+    et incline, se retrouve serre dans une colonne dimensionnee pour un
+    texte de sept points. Alberto, 23.09.2026 : « un lala texte incline en
+    bas a droite, extra moche ».
+
+    On repose donc, apres elle et sur la seule Vue actuelle, les largeurs
+    mesurees decalees d'autant, puis celles du bandeau.
+    """
+    import outils_lieux_charte as _charte
+    longueurs = _charte._mesures(sujet=sujet)
+    identifiant = _onglets(sujet=sujet)[ONGLET_VUE]["sheetId"]
+
+    def _largeur(debut, pixels):
+        return {"updateDimensionProperties": {
+            "range": {"sheetId": identifiant, "dimension": "COLUMNS",
+                      "startIndex": debut, "endIndex": debut + 1},
+            "properties": {"pixelSize": pixels}, "fields": "pixelSize"}}
+
+    requetes = [_largeur(c + LARGEUR_BANDEAU, _charte._largeur_pixels(longueurs[c]))
+                for c in sorted(longueurs)]
+    requetes.append(_largeur(COLONNE_VILLE, LARGEUR_COLONNE_VILLE))
+    requetes.append(_largeur(COLONNE_REFERENT, LARGEUR_COLONNE_REFERENT))
+    return requetes
+
+
+def _largeurs_de_la_vue(sujet: str = ""):
+    """Pose sur la Vue actuelle les largeurs qui tiennent compte du bandeau."""
+    requetes = _requetes_largeurs_de_la_vue(sujet=sujet)
+    if requetes:
+        _feuilles(sujet).batchUpdate(
+            spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
+    return len(requetes)
+
+
 def _habiller_la_vue(sujet: str = ""):
     """Pose le bandeau sur la Vue actuelle telle qu'elle vient d'etre ecrite.
 
@@ -803,8 +871,8 @@ def _habiller_la_vue(sujet: str = ""):
     melanger le ponctuel des agendas de salles. Plutot que de dupliquer ce
     travail, on reprend ici ce qu'elle vient d'ecrire, on en retire les
     bandes eteintes, on y ajoute les deux colonnes de tete et on repose
-    fusions, couleurs et vignettes. _ecrire_grille defusionne l'onglet
-    avant d'ecrire, il n'y a donc rien a defaire a la main.
+    fusions, couleurs, vignettes et largeurs. _ecrire_grille defusionne
+    l'onglet avant d'ecrire, il n'y a donc rien a defaire a la main.
 
     Idempotent : une grille qui porte deja le bandeau est ramenee a sa
     forme nue avant d'etre rhabillee.
@@ -823,6 +891,7 @@ def _habiller_la_vue(sujet: str = ""):
         _feuilles(sujet).batchUpdate(
             spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
     vignettes = _poser_les_vignettes(_cibles_des_vignettes(images, ID_LIEUX, ONGLET_VUE))
+    _largeurs_de_la_vue(sujet=sujet)
     return {"bandes": infos, "bandes_retirees": retirees, "vignettes": vignettes,
             "lignes": len(sortie)}
 
@@ -928,6 +997,30 @@ try:
     # module : le serveur garde l'objet d'origine. Le registre des lieux
     # porte deja le geste exact, employe pour le passage quotidien.
     import outils_lieux_registre as _registre
+
+    # La charte des largeurs passe APRES la generation dans le passage du
+    # matin et ecrase celles du bandeau. On l'enveloppe pour qu'elle
+    # repose ensuite les largeurs propres a la Vue actuelle. Trois modules
+    # en gardent une reference dans leurs globales, importee au
+    # chargement : la remplacer dans un seul ne servirait a rien.
+    import outils_lieux_charte as _charte
+    _largeurs_amont = _charte._appliquer_largeurs
+
+    def _appliquer_largeurs_avec_bandeau(sujet: str = ""):
+        posees = _largeurs_amont(sujet=sujet)
+        try:
+            posees += _largeurs_de_la_vue(sujet=sujet)
+        except Exception as _e:  # noqa: BLE001
+            print("[lieux villes] largeurs de la vue non reposées : "
+                  + type(_e).__name__ + " " + str(_e)[:200], flush=True)
+        return posees
+
+    for _module in (_charte, _ol, _registre):
+        try:
+            _module._appliquer_largeurs = _appliquer_largeurs_avec_bandeau
+        except Exception:  # noqa: BLE001
+            pass
+    print("[lieux villes] largeurs de la Vue actuelle greffées sur la charte", flush=True)
 
     _vue_du_jour_amont = _registre.lieux_vue_du_jour.fn if hasattr(
         _registre.lieux_vue_du_jour, "fn") else _registre.lieux_vue_du_jour
