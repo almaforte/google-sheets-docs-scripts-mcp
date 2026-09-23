@@ -547,7 +547,7 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
     fusions sous la forme de plages, et les images sous la forme
     {(ligne, colonne): adresse}.
     """
-    valeurs, fusions, images, infos = {}, [], {}, []
+    valeurs, fusions, images, infos, plages = {}, [], {}, [], []
     for bande in _bandes(grille):
         ville = None
         for site in bande["sites"]:
@@ -564,8 +564,16 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             if ville.get("image"):
                 images[(milieu, COLONNE_VILLE)] = ville["image"]
             fusions.append((milieu, bas + 1, COLONNE_VILLE))
+            # Le fond teal couvre la bande entiere, ses trois lignes de tete
+            # comprises, et s'arrete a la ligne vide qui la separe de la
+            # suivante : les bandes respirent, et la couleur ne descend plus
+            # en une longue barre sous la derniere d'entre elles.
+            plages.append((bande["ligne_etages"], bas + 1))
         else:
-            valeurs[(haut, COLONNE_VILLE)] = bande["sites"][0] if bande["sites"] else ""
+            # Une bande sans ville, le teletravail par exemple, ne recoit ni
+            # nom ni couleur : son intitule se lit deja dans sa ligne
+            # d'en-tete, et « HOME OFFICE » incline dans une colonne de
+            # soixante-quatre pixels se coupait au lieu de se lire.
             fusions.append((haut, bas + 1, COLONNE_VILLE))
 
         valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = ENTETE_BANDEAU
@@ -588,13 +596,14 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             "referents": [r["nom"] for r in gens],
             "image": bool(ville and ville.get("image")),
         })
-    return valeurs, fusions, images, infos
+    return valeurs, fusions, images, infos, plages
 
 
 def _grille_avec_bandeau(grille, sujet: str = ""):
     """La grille decalee de deux colonnes, bandeau rempli.
 
-    Rend la grille, les fusions du bandeau, les images et le bilan.
+    Rend la grille, les fusions du bandeau, les images, le bilan et les
+    plages de lignes a peindre aux couleurs de la ville.
     """
     villes = _villes(sujet=sujet)
     batiments = _batiments(sujet=sujet)
@@ -607,44 +616,58 @@ def _grille_avec_bandeau(grille, sujet: str = ""):
         titre = _cellule(grille[0], 0) if grille[0] else ""
         decalee[0] = [titre] + [""] * (LARGEUR_BANDEAU + max(0, len(grille[0]) - 1))
 
-    valeurs, fusions, images, infos = _contenu_du_bandeau(
+    valeurs, fusions, images, infos, plages = _contenu_du_bandeau(
         decalee, villes, batiments, referents)
     for (r, c), texte in valeurs.items():
         while len(decalee[r]) <= c:
             decalee[r].append("")
         decalee[r][c] = texte
-    return decalee, fusions, images, infos
+    return decalee, fusions, images, infos, plages
 
 
-def _requetes_bandeau(identifiant: int, fusions, images=None):
+def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
     """Mise en forme du bandeau : ville en teal, referents en tete doree.
 
     Les images ne sont plus posees par une formule, le parametre n'est
-    garde que pour la compatibilite des appels.
+    garde que pour la compatibilite des appels. Les plages sont les
+    premieres et dernieres lignes des bandes qui portent une ville : elles
+    seules recoivent le fond teal, de sorte que la ligne vide entre deux
+    bandes et tout ce qui suit la derniere restent blancs.
     """
+    plages = plages or []
     requetes = []
     for debut, fin, colonne in fusions:
         requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
             "startColumnIndex": colonne, "endColumnIndex": colonne + 1,
         }}})
-    # La colonne de la ville : fond teal, texte blanc, incline, comme la
-    # maquette d'Alberto du 23.09.2026.
+    # La colonne de la ville est d'abord rendue au blanc sur toute sa
+    # hauteur : sans quoi le teal d'un passage precedent, ou la vue etait
+    # plus longue, resterait sous la derniere bande.
     requetes.append({"repeatCell": {
         "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_VILLE,
                   "endColumnIndex": COLONNE_VILLE + 1},
-        "cell": {"userEnteredFormat": {
-            "backgroundColor": _rvb(TEAL),
-            "horizontalAlignment": "CENTER",
-            "verticalAlignment": "MIDDLE",
-            "textRotation": {"angle": -45},
-            "textFormat": {"fontFamily": POLICE, "fontSize": 14, "bold": True,
-                           "foregroundColor": _rvb("#ffffff")},
-        }},
-        "fields": ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
-                   "userEnteredFormat.verticalAlignment,userEnteredFormat.textRotation,"
-                   "userEnteredFormat.textFormat"),
+        "cell": {"userEnteredFormat": {"backgroundColor": _rvb("#ffffff")}},
+        "fields": "userEnteredFormat.backgroundColor",
     }})
+    # Puis chaque bande de ville : fond teal, texte blanc, incline, comme la
+    # maquette d'Alberto du 23.09.2026.
+    for debut, fin in plages:
+        requetes.append({"repeatCell": {
+            "range": {"sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
+                      "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_VILLE + 1},
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": _rvb(TEAL),
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "textRotation": {"angle": -45},
+                "textFormat": {"fontFamily": POLICE, "fontSize": 14, "bold": True,
+                               "foregroundColor": _rvb("#ffffff")},
+            }},
+            "fields": ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
+                       "userEnteredFormat.verticalAlignment,userEnteredFormat.textRotation,"
+                       "userEnteredFormat.textFormat"),
+        }})
     # La colonne des referents : texte de la charte, renvoi a la ligne.
     requetes.append({"repeatCell": {
         "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_REFERENT,
@@ -748,10 +771,10 @@ try:
 
         sortie, retirees = _sans_bandes_inactives(sortie, sujet=sujet)
         _rendre_les_images_lisibles(_villes(sujet=sujet))
-        sortie, fusions, images, infos = _grille_avec_bandeau(sortie, sujet=sujet)
+        sortie, fusions, images, infos, plages = _grille_avec_bandeau(sortie, sujet=sujet)
         _ol._ecrire_grille(onglet, sortie, sujet=sujet)
         sid = _onglets(sujet=sujet)[onglet]["sheetId"]
-        requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(sid, fusions, images)
+        requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(sid, fusions, images, plages)
         if requetes:
             _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
         vignettes = _poser_les_vignettes(
@@ -789,9 +812,10 @@ try:
         villes = _villes(sujet=sujet)
         batiments = _batiments(sujet=sujet)
         referents = _referents_de_lieu(sujet=sujet)
-        _, fusions, images, infos = _contenu_du_bandeau(vue, villes, batiments, referents)
+        _, fusions, images, infos, plages = _contenu_du_bandeau(
+            vue, villes, batiments, referents)
         sid = _onglets(ID_PATIENTS, sujet=sujet)[ONGLET_PATIENTS]["sheetId"]
-        requetes = _requetes_bandeau(sid, fusions)
+        requetes = _requetes_bandeau(sid, fusions, plages=plages)
         if requetes:
             _feuilles(sujet).batchUpdate(
                 spreadsheetId=ID_PATIENTS, body={"requests": requetes}).execute()
