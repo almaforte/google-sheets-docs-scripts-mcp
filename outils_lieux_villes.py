@@ -16,7 +16,12 @@ Ce que ce module ajoute aux vues, sans rien saisir a la main :
   colonne B : les referents de proximite de LIEU de cette ville. Un titre
       dore sur les trois lignes de tete, puis un corps creme ou se lisent
       le nom d'usage, EN GRAS, et une ligne par jour de presence. Le
-      participe s'accorde au sexe.
+      titre et le participe s'accordent a qui figure dessous, en genre et
+      en nombre : « Référente », « Référentes », « Référent »,
+      « Référents », et « Référent.s » quand la ville n'en a aucun.
+
+Les quatre colonnes de tete, ville, referent, jour et demi-journee, sont
+figees : Alberto, 23.09.2026, « faut figer jusqu'a D ».
 
 Une bande sans ville, le teletravail, ne recoit pas de bloc : Alberto,
 23.09.2026, « home office, pas de bloc ». Elle recoit tout de meme le
@@ -115,11 +120,16 @@ SERVICE_PROXIMITE = "Proximité"
 LARGEUR_BANDEAU = 2
 COLONNE_VILLE = 0
 COLONNE_REFERENT = 1
-ENTETE_BANDEAU = "Référent.s de proximité par lieu"
+SUITE_ENTETE = " de proximité par lieu"
+ENTETE_BANDEAU = "Référent.s" + SUITE_ENTETE
 LARGEUR_COLONNE_VILLE = 160
 LARGEUR_COLONNE_REFERENT = 200
 TAILLE_NOM_DE_VILLE = 20
 CREME = "#fff2cc"
+# La ville, le referent, le jour et la demi-journee restent a l'ecran
+# quand on file vers la droite. Alberto, 23.09.2026 : « faut figer
+# jusqu'a D ». Deux colonnes de bandeau, plus les deux de la grille.
+COLONNES_FIGEES = LARGEUR_BANDEAU + 2
 
 # Le deploiement versionne du projet « Almaval - RH - Onboarding des
 # collaborateurs », qui porte le fichier « 60 Vignettes des villes ».
@@ -429,6 +439,26 @@ def _lignes_du_referent(personne, ville_nom: str):
     return lignes
 
 
+def _entete_des_referents(gens):
+    """Le titre dore, accorde a qui figure dessous.
+
+    Regle posee par Alberto le 23.09.2026 : « Référent.s peut se decliner
+    aussi au masculin singulier pluriel, feminin singulier pluriel, en
+    fonction de qui figure ». Une femme seule donne « Référente »,
+    plusieurs femmes « Référentes », un homme seul « Référent », et
+    plusieurs personnes dont au moins un homme « Référents », l'accord
+    francais voulant le masculin des qu'un homme est du nombre. Quand
+    personne n'est nomme, la forme inclusive « Référent.s », qui
+    n'annonce ni genre ni nombre.
+    """
+    if not gens:
+        return ENTETE_BANDEAU
+    mot = "Référente" if all(p.get("sexe") == "F" for p in gens) else "Référent"
+    if len(gens) > 1:
+        mot += "s"
+    return mot + SUITE_ENTETE
+
+
 def _texte_du_referent(personne, ville_nom: str) -> str:
     """Le meme bloc, d'un seul tenant, pour les comptes rendus."""
     return "\n".join(_lignes_du_referent(personne, ville_nom))
@@ -661,8 +691,10 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             plages.append((bande["ligne_etages"], bas + 1))
 
             # Le titre dore couvre les TROIS lignes de tete, etages, jour
-            # et numero du bureau, comme la maquette.
-            valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = ENTETE_BANDEAU
+            # et numero du bureau, comme la maquette. Il s'accorde a qui
+            # figure dessous, d'ou la lecture des personnes d'abord.
+            gens = referents.get(_normaliser(ville["nom"]), [])
+            valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = _entete_des_referents(gens)
             fusions.append((bande["ligne_etages"], bande["ligne_numeros"] + 1,
                             COLONNE_REFERENT, "entete"))
 
@@ -671,7 +703,6 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
             # Rien n'est fusionne : une cellule fusionnee verticalement
             # fait grandir sa PREMIERE ligne pour contenir tout son texte,
             # ce qui deformait la bande.
-            gens = referents.get(_normaliser(ville["nom"]), [])
             bloc, noms = [], []
             for personne in gens:
                 if bloc:
@@ -870,6 +901,17 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None,
             "left": filet,
         }})
 
+    # Le gel des quatre colonnes de tete, la ville, le referent, le jour
+    # et la demi-journee : elles restent a l'ecran quand on file vers la
+    # droite, les bandes etant larges de quinze a vingt bureaux. Alberto,
+    # 23.09.2026 : « faut figer jusqu'a D ». Pose ici pour les deux vues,
+    # la charte des grilles ne reglant que les lignes figees.
+    requetes.append({"updateSheetProperties": {
+        "properties": {"sheetId": identifiant,
+                       "gridProperties": {"frozenColumnCount": COLONNES_FIGEES}},
+        "fields": "gridProperties.frozenColumnCount",
+    }})
+
     # Les largeurs des deux colonnes sont posees par _largeurs_de_la_vue
     # pour la Vue actuelle, et ici pour la copie publiee.
     requetes.append({"updateDimensionProperties": {
@@ -937,7 +979,10 @@ def _sans_le_bandeau(grille):
     la grille telle que le generateur la produit, sans les deux colonnes
     de tete.
     """
-    porte = any(_cellule(ligne, COLONNE_REFERENT) == ENTETE_BANDEAU for ligne in grille)
+    # Le titre s'accorde au genre et au nombre : on le reconnait a sa
+    # fin, « de proximité par lieu », et non a une chaine figee.
+    porte = any(str(_cellule(ligne, COLONNE_REFERENT)).endswith(SUITE_ENTETE)
+                for ligne in grille)
     if not porte:
         return grille
     nue = [list(ligne[LARGEUR_BANDEAU:]) for ligne in grille]
