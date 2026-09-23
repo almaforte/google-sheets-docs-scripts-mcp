@@ -9,14 +9,13 @@ des lieux actifs et des proxs indexees ».
 
 Ce que ce module ajoute aux vues, sans rien saisir a la main :
 
-  colonne A : la ville, lue dans Referentiel - Villes. Le nom occupe la
-      moitie haute de la bande, une image iconique la moitie basse, quand
-      la colonne Image du referentiel porte une adresse.
-  colonne B : les referents de proximite de LIEU de cette ville. Leur nom
-      se lit en face de chaque demi-journee ou ils sont presents sur
-      place, exactement comme un occupant de bureau : la geometrie de la
-      grille porte deja les jours, autant s'en servir. La ligne des
-      numeros nomme les referents et accorde le mot en genre.
+  colonne A : un bloc teal par ville, le nom incline sur la moitie haute,
+      la vignette iconique sur la moitie basse, quand la colonne Image de
+      Referentiel - Villes porte une adresse.
+  colonne B : les referents de proximite de LIEU de cette ville. Sous un
+      titre dore, sur fond creme, un bloc de texte par personne : son nom
+      dans l'ordre naturel, puis les jours ou elle est sur place, chacun
+      avec sa portee. Le participe s'accorde au sexe.
 
 D'ou viennent les trois informations, et pourquoi elles descendent seules
 
@@ -33,9 +32,9 @@ D'ou viennent les trois informations, et pourquoi elles descendent seules
       dont le lieu couvert est renseigne, et qui n'est pas echue, donne un
       referent de lieu pour cette ville.
   la presence : Registre - Engagements, les douze colonnes de
-      demi-journees, qui portent deja le nom de la ville. Le referent
-      parait aux demi-journees ou ce nom est celui de la ville de la
-      bande, jamais ailleurs.
+      demi-journees, qui portent deja le nom de la ville. Le referent est
+      dit present les jours ou ce nom est celui de la ville de la bande,
+      jamais ailleurs.
 
 Le module ne touche pas au socle. Il enveloppe _squelette, pour la
 geometrie, puis les deux portes par lesquelles la Vue actuelle est
@@ -95,8 +94,10 @@ LARGEUR_BANDEAU = 2
 COLONNE_VILLE = 0
 COLONNE_REFERENT = 1
 ENTETE_BANDEAU = "Référent.s de proximité par lieu"
-LARGEUR_COLONNE_VILLE = 64
-LARGEUR_COLONNE_REFERENT = 140
+LARGEUR_COLONNE_VILLE = 150
+LARGEUR_COLONNE_REFERENT = 200
+TAILLE_NOM_DE_VILLE = 18
+CREME = "#fff2cc"
 
 # Le deploiement versionne du projet « Almaval - RH - Onboarding des
 # collaborateurs », qui porte le fichier « 60 Vignettes des villes ».
@@ -212,8 +213,15 @@ def _ville_du_site(nom_site: str, villes, batiments):
 
 # --------------------------------------------------- referents de proximite
 
-def _sexe_des_personnes(sujet: str = ""):
-    """Nom d'usage et nom complet vers H ou F, lu dans Registre - Personnes."""
+def _fiches_des_personnes(sujet: str = ""):
+    """Ce qu'il faut savoir d'une personne pour la nommer et l'accorder.
+
+    Rend {nom normalise: {"sexe": "H" ou "F", "appellation": "Anita
+    Bober"}}. La cle est indexee sous le nom complet ET sous le nom
+    d'usage, les registres employant l'un ou l'autre. L'appellation suit
+    la maquette d'Alberto du 23.09.2026, qui nomme la personne dans
+    l'ordre naturel, prenom puis nom, et non dans l'ordre de classement.
+    """
     try:
         lignes = _lire(ONGLET_PERSONNES, ID_EFFECTIF, sujet=sujet)
     except Exception:  # noqa: BLE001
@@ -221,25 +229,37 @@ def _sexe_des_personnes(sujet: str = ""):
     if not lignes:
         return {}
     entetes = lignes[0]
-    try:
-        i_sexe = _colonne(entetes, "Sexe")
-    except RuntimeError:
-        return {}
-    indices = []
-    for nom in ("Nom prénom", "Nom d'usage"):
+
+    def _indice(nom):
         try:
-            indices.append(_colonne(entetes, nom))
+            return _colonne(entetes, nom)
         except RuntimeError:
-            continue
+            return None
+
+    i_sexe = _indice("Sexe")
+    i_nom = _indice("Nom")
+    i_prenom = _indice("Prénom")
+    cles = [i for i in (_indice("Nom prénom"), _indice("Nom d'usage")) if i is not None]
+    if not cles:
+        return {}
+
     par_nom = {}
     for ligne in lignes[1:]:
-        sexe = _normaliser(_cellule(ligne, i_sexe))[:1]
-        if sexe not in ("H", "F"):
+        sexe = _normaliser(_cellule(ligne, i_sexe))[:1] if i_sexe is not None else ""
+        nom = _cellule(ligne, i_nom) if i_nom is not None else ""
+        prenom = _cellule(ligne, i_prenom) if i_prenom is not None else ""
+        appellation = " ".join(x for x in (prenom, nom) if x)
+        if sexe not in ("H", "F") and not appellation:
             continue
-        for i in indices:
+        for i in cles:
             valeur = _normaliser(_cellule(ligne, i))
-            if valeur:
-                par_nom[valeur] = sexe
+            if not valeur:
+                continue
+            fiche = par_nom.setdefault(valeur, {"sexe": "", "appellation": ""})
+            if sexe in ("H", "F"):
+                fiche["sexe"] = sexe
+            if appellation:
+                fiche["appellation"] = appellation
     return par_nom
 
 
@@ -280,7 +300,7 @@ def _referents_de_lieu(sujet: str = ""):
 
     Une affectation compte si son service est Proximite, si sa colonne
     « Lieu couvert » porte une ville, et si elle n'est pas echue. Rend
-    {ville normalisee: [{nom, sexe, demis}]}, trie par nom.
+    {ville normalisee: [{nom, appellation, sexe, demis}]}, trie par nom.
     """
     try:
         lignes = _lire(ONGLET_AFFECTATIONS, ID_EFFECTIF, sujet=sujet)
@@ -302,7 +322,7 @@ def _referents_de_lieu(sujet: str = ""):
     except RuntimeError:
         i_fin = None
 
-    sexes = _sexe_des_personnes(sujet=sujet)
+    fiches = _fiches_des_personnes(sujet=sujet)
     presences = _presences_par_personne(sujet=sujet)
     aujourdhui = _aujourdhui()
 
@@ -323,9 +343,11 @@ def _referents_de_lieu(sujet: str = ""):
         if cle in vus:
             continue
         vus.add(cle)
+        fiche = fiches.get(_normaliser(nom), {})
         par_ville.setdefault(_normaliser(lieu), []).append({
             "nom": nom,
-            "sexe": sexes.get(_normaliser(nom), ""),
+            "appellation": fiche.get("appellation") or nom,
+            "sexe": fiche.get("sexe", ""),
             "demis": presences.get(_normaliser(nom), {}),
         })
     for ville in par_ville:
@@ -333,19 +355,33 @@ def _referents_de_lieu(sujet: str = ""):
     return par_ville
 
 
-def _intitule(referents) -> str:
-    """« Référente de lieu », accorde en genre et en nombre.
+def _portee_du_jour(demis_du_jour) -> str:
+    """« toute la journée », « le matin » ou « l'après-midi »."""
+    if len(demis_du_jour) >= len(DEMIS):
+        return "toute la journée"
+    return "le matin" if demis_du_jour[0] == DEMIS[0] else "l'après-midi"
 
-    Alberto, 23.09.2026 : « oui utilise le genre ». Une femme seule donne
-    la forme feminine, un homme seul la masculine, un groupe mixte ou
-    inconnu la forme masculine du pluriel, qui vaut pour les deux.
+
+def _texte_du_referent(personne, ville_nom: str) -> str:
+    """Le bloc de texte d'un referent, tel qu'Alberto l'a dessine.
+
+    Le nom dans l'ordre naturel, une ligne vide, puis les jours de
+    presence dans cette ville, chacun avec sa portee. Le participe
+    s'accorde : « Présente les » pour une femme, « Présent les » pour un
+    homme, la forme masculine a defaut de sexe connu.
     """
-    if not referents:
-        return ""
-    sexes = {r["sexe"] for r in referents if r["sexe"]}
-    if len(referents) == 1:
-        return "Référente de lieu" if sexes == {"F"} else "Référent de lieu"
-    return "Référentes de lieu" if sexes == {"F"} else "Référents de lieu"
+    lignes = [personne.get("appellation") or personne["nom"]]
+    jours = []
+    for jour in JOURS:
+        demis = [demi for demi in DEMIS
+                 if _normaliser(personne["demis"].get((jour, demi), "")) == _normaliser(ville_nom)]
+        if demis:
+            jours.append(jour + ", " + _portee_du_jour(demis))
+    if jours:
+        lignes.append("")
+        lignes.append("Présente les" if personne.get("sexe") == "F" else "Présent les")
+        lignes.extend(jours)
+    return "\n".join(lignes)
 
 
 # -------------------------------------------------------- geometrie filtree
@@ -540,11 +576,12 @@ def _bandes(grille):
 
 
 def _contenu_du_bandeau(grille, villes, batiments, referents):
-    """Rend les valeurs du bandeau et les fusions a poser.
+    """Rend les valeurs du bandeau, ses fusions et ses images.
 
-    Les valeurs sont rendues sous la forme {(ligne, colonne): texte}, les
-    fusions sous la forme de plages, et les images sous la forme
-    {(ligne, colonne): adresse}.
+    Les valeurs sont {(ligne, colonne): texte}. Les fusions portent leur
+    role, de sorte que la mise en forme sache quoi peindre : « ville » et
+    « vignette » pour la colonne de gauche, « entete » et « corps » pour
+    celle des referents. Les images sont {(ligne, colonne): adresse}.
     """
     valeurs, fusions, images, infos, plages = {}, [], {}, [], []
     for bande in _bandes(grille):
@@ -558,11 +595,13 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
         milieu = haut + (len(lignes) // 2)
 
         if ville:
+            # Le nom sur la moitie haute, la vignette sur la moitie basse,
+            # comme la maquette d'Alberto du 23.09.2026.
             valeurs[(haut, COLONNE_VILLE)] = ville["nom"]
-            fusions.append((haut, milieu, COLONNE_VILLE))
+            fusions.append((haut, milieu, COLONNE_VILLE, "ville"))
             if ville.get("image"):
                 images[(milieu, COLONNE_VILLE)] = ville["image"]
-            fusions.append((milieu, bas + 1, COLONNE_VILLE))
+            fusions.append((milieu, bas + 1, COLONNE_VILLE, "vignette"))
             # Le fond teal couvre la bande entiere, ses trois lignes de tete
             # comprises, et s'arrete a la ligne vide qui la separe de la
             # suivante : les bandes respirent, et la couleur ne descend plus
@@ -571,28 +610,24 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
         else:
             # Une bande sans ville, le teletravail par exemple, ne recoit ni
             # nom ni couleur : son intitule se lit deja dans sa ligne
-            # d'en-tete, et « HOME OFFICE » incline dans une colonne de
-            # soixante-quatre pixels se coupait au lieu de se lire.
-            fusions.append((haut, bas + 1, COLONNE_VILLE))
+            # d'en-tete, et le mot incline se coupait au lieu de se lire.
+            fusions.append((haut, bas + 1, COLONNE_VILLE, "vide"))
 
         valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = ENTETE_BANDEAU
-        fusions.append((bande["ligne_etages"], bande["ligne_entete"] + 1, COLONNE_REFERENT))
+        fusions.append((bande["ligne_etages"], bande["ligne_entete"] + 1,
+                        COLONNE_REFERENT, "entete"))
 
+        # Le corps : un seul bloc de texte pour toute la bande, une
+        # personne apres l'autre, separees par une ligne vide.
         gens = referents.get(_normaliser(ville["nom"]) if ville else "", [])
         if gens:
-            valeurs[(bande["ligne_numeros"], COLONNE_REFERENT)] = (
-                _intitule(gens) + " : " + ", ".join(r["nom"] for r in gens))
-        for r, jour, demi in sorted(bande["demis"]):
-            presents = []
-            for personne in gens:
-                lieu = personne["demis"].get((jour, demi), "")
-                if ville and lieu and _normaliser(lieu) == _normaliser(ville["nom"]):
-                    presents.append(personne["nom"])
-            if presents:
-                valeurs[(r, COLONNE_REFERENT)] = "\n".join(presents)
+            valeurs[(bande["ligne_numeros"], COLONNE_REFERENT)] = "\n\n".join(
+                _texte_du_referent(personne, ville["nom"]) for personne in gens)
+        fusions.append((bande["ligne_numeros"], bas + 1, COLONNE_REFERENT, "corps"))
+
         infos.append({
             "ville": ville["nom"] if ville else (bande["sites"][0] if bande["sites"] else ""),
-            "referents": [r["nom"] for r in gens],
+            "referents": [r.get("appellation") or r["nom"] for r in gens],
             "image": bool(ville and ville.get("image")),
         })
     return valeurs, fusions, images, infos, plages
@@ -625,13 +660,18 @@ def _grille_avec_bandeau(grille, sujet: str = ""):
 
 
 def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
-    """Mise en forme du bandeau : ville en teal, referents en tete doree.
+    """Mise en forme du bandeau, d'apres la maquette d'Alberto.
+
+    La colonne de gauche est un bloc teal par ville : le nom en blanc et
+    incline sur la moitie haute, la vignette sur la moitie basse. La
+    colonne des referents porte son titre sur fond dore, puis un corps
+    creme ou se lisent le nom et les jours de presence.
 
     Les images ne sont plus posees par une formule, le parametre n'est
     garde que pour la compatibilite des appels. Les plages sont les
-    premieres et dernieres lignes des bandes qui portent une ville : elles
-    seules recoivent le fond teal, de sorte que la ligne vide entre deux
-    bandes et tout ce qui suit la derniere restent blancs.
+    premieres et dernieres lignes des bandes qui portent une ville :
+    elles seules recoivent le fond teal, de sorte que la ligne vide entre
+    deux bandes et tout ce qui suit la derniere restent blancs.
     """
     plages = plages or []
     # Les deux colonnes du bandeau sont d'abord defusionnees : chez les
@@ -641,66 +681,68 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
         "sheetId": identifiant,
         "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_REFERENT + 1,
     }}}]
-    for debut, fin, colonne in fusions:
+    for debut, fin, colonne, _role in fusions:
+        if fin <= debut:
+            continue
         requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
             "startColumnIndex": colonne, "endColumnIndex": colonne + 1,
         }}})
-    # La colonne de la ville est d'abord rendue au blanc sur toute sa
-    # hauteur : sans quoi le teal d'un passage precedent, ou la vue etait
-    # plus longue, resterait sous la derniere bande.
-    requetes.append({"repeatCell": {
-        "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_VILLE,
-                  "endColumnIndex": COLONNE_VILLE + 1},
-        "cell": {"userEnteredFormat": {"backgroundColor": _rvb("#ffffff")}},
-        "fields": "userEnteredFormat.backgroundColor",
-    }})
-    # Puis chaque bande de ville : fond teal, texte blanc, incline, comme la
-    # maquette d'Alberto du 23.09.2026.
-    for debut, fin in plages:
-        requetes.append({"repeatCell": {
-            "range": {"sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
-                      "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_VILLE + 1},
-            "cell": {"userEnteredFormat": {
-                "backgroundColor": _rvb(TEAL),
-                "horizontalAlignment": "CENTER",
-                "verticalAlignment": "MIDDLE",
-                "textRotation": {"angle": -45},
-                "textFormat": {"fontFamily": POLICE, "fontSize": 14, "bold": True,
-                               "foregroundColor": _rvb("#ffffff")},
-            }},
-            "fields": ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
-                       "userEnteredFormat.verticalAlignment,userEnteredFormat.textRotation,"
-                       "userEnteredFormat.textFormat"),
-        }})
-    # La colonne des referents : texte de la charte, renvoi a la ligne.
-    requetes.append({"repeatCell": {
-        "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_REFERENT,
-                  "endColumnIndex": COLONNE_REFERENT + 1},
-        "cell": {"userEnteredFormat": {
-            "horizontalAlignment": "CENTER",
-            "verticalAlignment": "MIDDLE",
-            "wrapStrategy": "WRAP",
-            "textFormat": {"fontFamily": POLICE, "fontSize": TAILLE,
-                           "foregroundColor": _rvb(TEAL)},
-        }},
-        "fields": ("userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,"
-                   "userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat"),
-    }})
-    for debut, fin, colonne in fusions:
-        if colonne != COLONNE_REFERENT:
-            continue
-        # La seule fusion de la colonne des referents est son en-tete.
+
+    def _peindre(debut, fin, colonne, format_, champs):
         requetes.append({"repeatCell": {
             "range": {"sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
                       "startColumnIndex": colonne, "endColumnIndex": colonne + 1},
-            "cell": {"userEnteredFormat": {
+            "cell": {"userEnteredFormat": format_}, "fields": champs,
+        }})
+
+    # Les deux colonnes sont d'abord rendues au blanc sur toute leur
+    # hauteur : sans quoi les couleurs d'un passage precedent, ou la vue
+    # etait plus longue, resteraient sous la derniere bande.
+    requetes.append({"repeatCell": {
+        "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_VILLE,
+                  "endColumnIndex": COLONNE_REFERENT + 1},
+        "cell": {"userEnteredFormat": {"backgroundColor": _rvb("#ffffff")}},
+        "fields": "userEnteredFormat.backgroundColor",
+    }})
+    for debut, fin in plages:
+        _peindre(debut, fin, COLONNE_VILLE, {
+            "backgroundColor": _rvb(TEAL),
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE",
+            "textRotation": {"angle": -45},
+            "textFormat": {"fontFamily": POLICE, "fontSize": TAILLE_NOM_DE_VILLE,
+                           "bold": True, "foregroundColor": _rvb("#ffffff")},
+        }, ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
+            "userEnteredFormat.verticalAlignment,userEnteredFormat.textRotation,"
+            "userEnteredFormat.textFormat"))
+
+    for debut, fin, colonne, role in fusions:
+        if colonne != COLONNE_REFERENT or fin <= debut:
+            continue
+        if role == "entete":
+            _peindre(debut, fin, colonne, {
                 "backgroundColor": _rvb(DORE),
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
                 "textFormat": {"fontFamily": POLICE, "fontSize": TAILLE, "bold": True,
                                "foregroundColor": _rvb(TEAL)},
-            }},
-            "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat",
-        }})
+            }, ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
+                "userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,"
+                "userEnteredFormat.textFormat"))
+        else:
+            _peindre(debut, fin, colonne, {
+                "backgroundColor": _rvb(CREME),
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+                "textFormat": {"fontFamily": POLICE, "fontSize": TAILLE,
+                               "foregroundColor": _rvb(TEAL)},
+            }, ("userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment,"
+                "userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,"
+                "userEnteredFormat.textFormat"))
+
     requetes.append({"updateDimensionProperties": {
         "range": {"sheetId": identifiant, "dimension": "COLUMNS",
                   "startIndex": COLONNE_VILLE, "endIndex": COLONNE_VILLE + 1},
@@ -914,14 +956,15 @@ def lieux_bandeau_villes(confirmer: bool = False, sujet: str = ""):
     """Etat du bandeau des villes, et reprise de sa mise en forme.
 
     Sans confirmer, rend ce que le bandeau porterait : villes actives,
-    batiments retenus, referents de lieu par ville et leurs demi-journees
-    de presence. Avec confirmer, repose la mise en forme du bandeau sur la
+    batiments retenus, referents de lieu par ville et leurs jours de
+    presence. Avec confirmer, repose la mise en forme du bandeau sur la
     copie publiee chez les patients, ce que la charte des grilles ne fait
     pas d'elle-meme.
     """
     villes = _villes(sujet=sujet)
     batiments = _batiments(sujet=sujet)
     referents = _referents_de_lieu(sujet=sujet)
+    par_nom = {v["nom"]: v for v in villes}
     etat = {
         "villes_actives": [v["nom"] for v in villes],
         "villes_avec_image": [v["nom"] for v in villes if v.get("image")],
@@ -929,15 +972,15 @@ def lieux_bandeau_villes(confirmer: bool = False, sujet: str = ""):
         "batiments_ecartes": sorted(
             f["nom"] + " (" + f["statut"].capitalize() + ")"
             for f in _batiments_tous(sujet=sujet).values() if f["statut"] != "ACTIF"),
+        "villes_sans_referent": [v["nom"] for v in villes
+                                 if not referents.get(_normaliser(v["nom"]))],
         "ordre_des_bandes": _ordre_des_bandes(sujet=sujet),
-        "referents": {ville: [{"nom": r["nom"], "sexe": r["sexe"],
-                               "demi_journees_sur_place": sorted(
-                                   jour + " " + demi.lower()
-                                   for (jour, demi), lieu in r["demis"].items()
-                                   if _normaliser(lieu) == ville)}
-                              for r in gens]
-                      for ville, gens in referents.items()},
+        "referents": {},
     }
+    for nom, ville in par_nom.items():
+        gens = referents.get(_normaliser(nom), [])
+        if gens:
+            etat["referents"][nom] = [_texte_du_referent(personne, nom) for personne in gens]
     if confirmer:
         etat["publication"] = _reposer_le_bandeau_chez_patients(sujet=sujet)
     return etat
