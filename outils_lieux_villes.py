@@ -49,10 +49,12 @@ actuelle et dans la copie publiee chez les patients, les deux vues que
 l'on regarde.
 """
 
+import re as _re
+
 import outils_lieux as _ol
 import outils_lieux_socle as _socle
 
-from main import mcp, tolerant
+from main import _drive, mcp, tolerant
 from outils_lieux_socle import (
     BATIMENT_ADMINISTRATION,
     DEMIS,
@@ -94,7 +96,7 @@ LARGEUR_BANDEAU = 2
 COLONNE_VILLE = 0
 COLONNE_REFERENT = 1
 ENTETE_BANDEAU = "Référent.s de proximité par lieu"
-LARGEUR_COLONNE_VILLE = 46
+LARGEUR_COLONNE_VILLE = 64
 LARGEUR_COLONNE_REFERENT = 140
 
 
@@ -145,8 +147,13 @@ def _villes(sujet: str = ""):
     return villes
 
 
-def _batiments(sujet: str = ""):
-    """Batiments actifs, du nom affiche normalise vers la cle de sa ville."""
+def _batiments_tous(sujet: str = ""):
+    """Tous les batiments du referentiel, avec leur ville et leur statut.
+
+    Rend {nom affiche normalise: {"ville": cle, "statut": statut
+    normalise}}. Le statut vient de Referentiel - Batiments, qui est
+    aligne sur l'onglet Sites d'Almaval - Listes : Actif, Exclu ou Ferme.
+    """
     lignes = _lire(ONGLET_BATIMENTS, sujet=sujet)
     if not lignes:
         return {}
@@ -154,13 +161,23 @@ def _batiments(sujet: str = ""):
     i_nom = _colonne(entetes, "Nom affiché")
     i_ville = _colonne(entetes, "Clé de la ville")
     i_statut = _colonne(entetes, "Statut")
-    actifs = {}
+    tous = {}
     for ligne in lignes[1:]:
         nom = _cellule(ligne, i_nom)
-        if not nom or _normaliser(_cellule(ligne, i_statut)) != "ACTIF":
+        if not nom:
             continue
-        actifs[_normaliser(nom)] = _cellule(ligne, i_ville)
-    return actifs
+        tous[_normaliser(nom)] = {
+            "nom": nom,
+            "ville": _cellule(ligne, i_ville),
+            "statut": _normaliser(_cellule(ligne, i_statut)),
+        }
+    return tous
+
+
+def _batiments(sujet: str = ""):
+    """Batiments actifs, du nom affiche normalise vers la cle de sa ville."""
+    return {n: f["ville"] for n, f in _batiments_tous(sujet=sujet).items()
+            if f["statut"] == "ACTIF"}
 
 
 def _ville_du_site(nom_site: str, villes, batiments):
@@ -361,6 +378,85 @@ def _filtrer_les_bureaux(par_identifiant, sujet: str = ""):
     garde = set(actifs) | {_normaliser(BATIMENT_ADMINISTRATION)}
     return {cle: fiche for cle, fiche in par_identifiant.items()
             if _normaliser(fiche.get("nom_batiment", "")) in garde}
+
+
+def _identifiant_drive(adresse) -> str:
+    """L'identifiant Drive porte par une adresse, s'il y en a un."""
+    texte = str(adresse or "")
+    for motif in (r"[?&]id=([A-Za-z0-9_-]{20,})", r"/d/([A-Za-z0-9_-]{20,})"):
+        trouve = _re.search(motif, texte)
+        if trouve:
+            return trouve.group(1)
+    return ""
+
+
+_IMAGES_OUVERTES = set()
+
+
+def _rendre_les_images_lisibles(villes):
+    """Ouvre les vignettes en lecture par lien, une fois par vignette.
+
+    La formule IMAGE d'une feuille est evaluee par les serveurs de Google
+    sans les droits du lecteur : une image de Drive visible seulement par
+    la maison rend #REF!. Les vignettes des villes sont des dessins sans
+    contenu propre a Almaval, les ouvrir en lecture ne decouvre rien. Le
+    geste est idempotent et sans effet sur les autres fichiers du dossier.
+    """
+    ouvertes = []
+    for ville in villes:
+        identifiant = _identifiant_drive(ville.get("image"))
+        if not identifiant or identifiant in _IMAGES_OUVERTES:
+            continue
+        try:
+            _drive().permissions().create(
+                fileId=identifiant, body={"type": "anyone", "role": "reader"},
+                supportsAllDrives=True, fields="id").execute()
+            ouvertes.append(ville["nom"])
+        except Exception as _e:  # noqa: BLE001
+            print("[lieux villes] vignette non ouverte (" + ville["nom"] + ") : "
+                  + type(_e).__name__ + " " + str(_e)[:160], flush=True)
+        _IMAGES_OUVERTES.add(identifiant)
+    return ouvertes
+
+
+def _sans_bandes_inactives(grille, sujet: str = ""):
+    """Retire de la grille les bandes dont le batiment n'est plus actif.
+
+    Alberto, 23.09.2026 : « il y a que les lieux actifs qui doivent
+    descendre en automatique depuis le generateur dans les differentes
+    vues des lieux ». La geometrie de Propositions, surface de saisie,
+    garde la Lisiere ; les vues, elles, ne la montrent plus.
+
+    Une bande n'est retiree que si le referentiel connait ses sites et
+    qu'aucun n'est actif : la bande du teletravail et celle de
+    l'administration, que le referentiel des batiments ne nomme pas,
+    restent en place. Quand deux batiments partagent une bande, comme les
+    deux immeubles de Morges, il suffit qu'un seul soit actif pour que la
+    bande demeure : le jour ou l'un des deux fermera, c'est la geometrie
+    de Propositions qu'il faudra reprendre.
+    """
+    tous = _batiments_tous(sujet=sujet)
+    if not tous:
+        return grille, []
+    par_entete = {}
+    for bloc in _blocs(grille):
+        par_entete.setdefault(bloc["ligne_entete"], []).append(bloc)
+    a_retirer, retires = set(), []
+    for ligne_entete in sorted(par_entete):
+        blocs = par_entete[ligne_entete]
+        fiches = [tous.get(_normaliser(b["site"])) for b in blocs]
+        if not any(fiches):
+            continue
+        if any(f and f["statut"] == "ACTIF" for f in fiches):
+            continue
+        fin = max(b["fin"] for b in blocs)
+        while fin < len(grille) and not any(str(x).strip() for x in grille[fin]):
+            fin += 1
+        a_retirer.update(range(max(0, ligne_entete - 1), fin))
+        retires.extend(b["site"] for b in blocs)
+    if not a_retirer:
+        return grille, []
+    return [l for i, l in enumerate(grille) if i not in a_retirer], retires
 
 
 # ----------------------------------------------------------------- bandeau
@@ -598,6 +694,8 @@ try:
             sortie[0][0] = titre
             sortie.extend(_ol._bande_teletravail(_ol._teletravail_au(date_iso, sujet=sujet)))
 
+        sortie, retirees = _sans_bandes_inactives(sortie, sujet=sujet)
+        _rendre_les_images_lisibles(_villes(sujet=sujet))
         sortie, fusions, images, infos = _grille_avec_bandeau(sortie, sujet=sujet)
         _ol._ecrire_grille(onglet, sortie, sujet=sujet)
         sid = _onglets(sujet=sujet)[onglet]["sheetId"]
@@ -606,9 +704,11 @@ try:
             _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
         _journaliser([[_maintenant(), onglet, "Génération", date_iso, "", str(poses), "Terminé",
                        "cellules occupées au " + _jolie_date(date_iso)
-                       + ", bandeau des villes : " + str(len(infos)) + " bandes"]], sujet=sujet)
+                       + ", bandeau des villes : " + str(len(infos)) + " bandes"
+                       + (", bandes retirées : " + ", ".join(retirees) if retirees else "")]],
+                     sujet=sujet)
         return {"onglet": onglet, "date": date_iso, "cellules_occupees": poses,
-                "lignes": len(sortie), "bandes": infos}
+                "lignes": len(sortie), "bandes": infos, "bandes_retirees": retirees}
 
     _ol._generer_vue = _generer_vue_avec_bandeau
     print("[lieux villes] bandeau greffé sur la Vue actuelle", flush=True)
@@ -664,6 +764,9 @@ def lieux_bandeau_villes(confirmer: bool = False, sujet: str = ""):
         "villes_actives": [v["nom"] for v in villes],
         "villes_avec_image": [v["nom"] for v in villes if v.get("image")],
         "batiments_actifs": sorted(batiments),
+        "batiments_ecartes": sorted(
+            f["nom"] + " (" + f["statut"].capitalize() + ")"
+            for f in _batiments_tous(sujet=sujet).values() if f["statut"] != "ACTIF"),
         "ordre_des_bandes": _ordre_des_bandes(sujet=sujet),
         "referents": {ville: [{"nom": r["nom"], "sexe": r["sexe"],
                                "demi_journees_sur_place": sorted(
