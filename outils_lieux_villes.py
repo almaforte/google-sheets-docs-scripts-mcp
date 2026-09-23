@@ -13,9 +13,9 @@ Ce que ce module ajoute aux vues, sans rien saisir a la main :
       la vignette iconique sur la moitie basse, quand la colonne Image de
       Referentiel - Villes porte une adresse.
   colonne B : les referents de proximite de LIEU de cette ville. Sous un
-      titre dore, sur fond creme, un bloc de texte par personne : son nom
-      dans l'ordre naturel, puis les jours ou elle est sur place, chacun
-      avec sa portee. Le participe s'accorde au sexe.
+      titre dore, sur fond creme, un bloc par personne : son nom dans
+      l'ordre naturel, puis les jours ou elle est sur place, chacun avec
+      sa portee. Le participe s'accorde au sexe.
 
 D'ou viennent les trois informations, et pourquoi elles descendent seules
 
@@ -362,13 +362,17 @@ def _portee_du_jour(demis_du_jour) -> str:
     return "le matin" if demis_du_jour[0] == DEMIS[0] else "l'après-midi"
 
 
-def _texte_du_referent(personne, ville_nom: str) -> str:
-    """Le bloc de texte d'un referent, tel qu'Alberto l'a dessine.
+def _lignes_du_referent(personne, ville_nom: str):
+    """Le bloc d'un referent, ligne a ligne, tel qu'Alberto l'a dessine.
 
     Le nom dans l'ordre naturel, une ligne vide, puis les jours de
     presence dans cette ville, chacun avec sa portee. Le participe
     s'accorde : « Présente les » pour une femme, « Présent les » pour un
     homme, la forme masculine a defaut de sexe connu.
+
+    Rendu ligne a ligne et non en un seul texte : chaque ligne ira dans
+    sa propre cellule. Une cellule fusionnee verticalement fait grandir sa
+    PREMIERE ligne pour contenir tout le texte, ce qui deformait la bande.
     """
     lignes = [personne.get("appellation") or personne["nom"]]
     jours = []
@@ -381,7 +385,12 @@ def _texte_du_referent(personne, ville_nom: str) -> str:
         lignes.append("")
         lignes.append("Présente les" if personne.get("sexe") == "F" else "Présent les")
         lignes.extend(jours)
-    return "\n".join(lignes)
+    return lignes
+
+
+def _texte_du_referent(personne, ville_nom: str) -> str:
+    """Le meme bloc, d'un seul tenant, pour les comptes rendus."""
+    return "\n".join(_lignes_du_referent(personne, ville_nom))
 
 
 # -------------------------------------------------------- geometrie filtree
@@ -580,9 +589,8 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
 
     Les valeurs sont {(ligne, colonne): texte}. Les fusions portent leur
     role, de sorte que la mise en forme sache quoi peindre : « ville » et
-    « vignette » pour la colonne de gauche, « entete », « corps » et
-    « creme » pour celle des referents. Les images sont {(ligne, colonne):
-    adresse}.
+    « vignette » pour la colonne de gauche, « entete » et « creme » pour
+    celle des referents. Les images sont {(ligne, colonne): adresse}.
     """
     valeurs, fusions, images, infos, plages = {}, [], {}, [], []
     for bande in _bandes(grille):
@@ -618,20 +626,23 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
         fusions.append((bande["ligne_etages"], bande["ligne_entete"] + 1,
                         COLONNE_REFERENT, "entete"))
 
-        # Le corps : un seul bloc de texte pour toute la bande, une
-        # personne apres l'autre, separees par une ligne vide. Il commence
-        # a la premiere demi-journee et non a la ligne des numeros de
-        # bureau : dans une cellule fusionnee verticalement, c'est la
-        # PREMIERE ligne qui grandit pour contenir le texte, et la ligne
-        # des numeros se retrouvait haute de six lignes.
+        # Le corps : une ligne de texte par ligne de grille, une personne
+        # apres l'autre, separees par une ligne vide, et le tout centre
+        # verticalement dans la bande. Rien n'est fusionne ici : une
+        # cellule fusionnee verticalement fait grandir sa PREMIERE ligne
+        # pour contenir tout son texte, ce qui deformait la bande.
         gens = referents.get(_normaliser(ville["nom"]) if ville else "", [])
-        if gens:
-            valeurs[(haut, COLONNE_REFERENT)] = "\n\n".join(
-                _texte_du_referent(personne, ville["nom"]) for personne in gens)
-        fusions.append((haut, bas + 1, COLONNE_REFERENT, "corps"))
-        # La ligne des numeros reste seule, mais du meme creme, pour que la
-        # colonne n'ait pas de trou entre son titre et son corps.
-        fusions.append((bande["ligne_numeros"], haut, COLONNE_REFERENT, "creme"))
+        bloc = []
+        for personne in gens:
+            if bloc:
+                bloc.append("")
+            bloc.extend(_lignes_du_referent(personne, ville["nom"]))
+        depart = haut + max(0, (len(lignes) - len(bloc)) // 2)
+        for i, texte in enumerate(bloc):
+            if texte and depart + i <= bas:
+                valeurs[(depart + i, COLONNE_REFERENT)] = texte
+        # Le creme court du titre au bas de la bande, sans fusion.
+        fusions.append((bande["ligne_numeros"], bas + 1, COLONNE_REFERENT, "creme"))
 
         infos.append({
             "ville": ville["nom"] if ville else (bande["sites"][0] if bande["sites"] else ""),
