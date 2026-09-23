@@ -15,8 +15,8 @@ Ce que ce module ajoute aux vues, sans rien saisir a la main :
       Referentiel - Villes porte une adresse.
   colonne B : les referents de proximite de LIEU de cette ville. Un titre
       dore sur les trois lignes de tete, puis un corps creme ou se lisent
-      le nom, EN GRAS, dans l'ordre naturel, et les jours de presence
-      groupes par portee. Le participe s'accorde au sexe.
+      le nom d'usage, EN GRAS, et une ligne par jour de presence. Le
+      participe s'accorde au sexe.
 
 Une bande sans ville, le teletravail, ne recoit pas de bloc : Alberto,
 23.09.2026, « home office, pas de bloc ». Elle recoit tout de meme le
@@ -238,11 +238,15 @@ def _ville_du_site(nom_site: str, villes, batiments):
 def _fiches_des_personnes(sujet: str = ""):
     """Ce qu'il faut savoir d'une personne pour la nommer et l'accorder.
 
-    Rend {nom normalise: {"sexe": "H" ou "F", "appellation": "Anita
-    Bober"}}. La cle est indexee sous le nom complet ET sous le nom
-    d'usage, les registres employant l'un ou l'autre. L'appellation suit
-    la maquette d'Alberto du 23.09.2026, qui nomme la personne dans
-    l'ordre naturel, prenom puis nom, et non dans l'ordre de classement.
+    Rend {nom normalise: {"sexe": "H" ou "F", "appellation": "Bober
+    Anita"}}. La cle est indexee sous le nom complet ET sous le nom
+    d'usage, les registres employant l'un ou l'autre.
+
+    L'appellation est le NOM D'USAGE, nom puis prenom, tel que le porte
+    Registre - Personnes : Alberto, 23.09.2026, « nom et prenom d'usage ».
+    C'est la forme qu'emploie deja la grille des bureaux, « Nunez Pia »,
+    « Forte Alberto M. » : le bandeau et les cases nomment donc la meme
+    personne de la meme facon. A defaut de nom d'usage, le nom civil.
     """
     try:
         lignes = _lire(ONGLET_PERSONNES, ID_EFFECTIF, sujet=sujet)
@@ -261,7 +265,8 @@ def _fiches_des_personnes(sujet: str = ""):
     i_sexe = _indice("Sexe")
     i_nom = _indice("Nom")
     i_prenom = _indice("Prénom")
-    cles = [i for i in (_indice("Nom prénom"), _indice("Nom d'usage")) if i is not None]
+    i_usage = _indice("Nom d'usage")
+    cles = [i for i in (_indice("Nom prénom"), i_usage) if i is not None]
     if not cles:
         return {}
 
@@ -270,7 +275,8 @@ def _fiches_des_personnes(sujet: str = ""):
         sexe = _normaliser(_cellule(ligne, i_sexe))[:1] if i_sexe is not None else ""
         nom = _cellule(ligne, i_nom) if i_nom is not None else ""
         prenom = _cellule(ligne, i_prenom) if i_prenom is not None else ""
-        appellation = " ".join(x for x in (prenom, nom) if x)
+        usage = _cellule(ligne, i_usage) if i_usage is not None else ""
+        appellation = usage or " ".join(x for x in (nom, prenom) if x)
         if sexe not in ("H", "F") and not appellation:
             continue
         for i in cles:
@@ -377,13 +383,18 @@ def _referents_de_lieu(sujet: str = ""):
     return par_ville
 
 
-def _jours_par_portee(personne, ville_nom: str):
-    """Les jours de presence dans cette ville, groupes par portee.
+def _presences_du_referent(personne, ville_nom: str):
+    """Les presences dans cette ville, une ligne par jour.
 
-    Rend une liste de couples (portee, jours), dans l'ordre : la journee
-    entiere d'abord, puis les matins, puis les apres-midi.
+    Rend une liste de « Lundi, toute la journée », dans l'ordre de la
+    semaine. Alberto, 23.09.2026 : les jours groupes en une seule phrase,
+    « Lundi, mardi, mercredi, jeudi et vendredi, toute la journée »,
+    passaient a la ligne au milieu d'un mot et se coupaient, la colonne
+    etant etroite. Une ligne par jour tient dans la largeur, se lit d'un
+    coup d'oeil, et le bloc reste plus court que les douze demi-journees
+    de la bande.
     """
-    par_portee = {}
+    lignes = []
     for jour in JOURS:
         demis = [demi for demi in DEMIS
                  if _normaliser(personne["demis"].get((jour, demi), "")) == _normaliser(ville_nom)]
@@ -395,40 +406,26 @@ def _jours_par_portee(personne, ville_nom: str):
             portee = "le matin"
         else:
             portee = "l'après-midi"
-        par_portee.setdefault(portee, []).append(jour)
-    return [(portee, par_portee[portee])
-            for portee in ("toute la journée", "le matin", "l'après-midi")
-            if portee in par_portee]
-
-
-def _enumeration(jours):
-    """« Mardi, mercredi et jeudi » : le premier en capitale, et « et »."""
-    mots = [jours[0]] + [j.lower() for j in jours[1:]]
-    if len(mots) == 1:
-        return mots[0]
-    return ", ".join(mots[:-1]) + " et " + mots[-1]
+        lignes.append(jour + ", " + portee)
+    return lignes
 
 
 def _lignes_du_referent(personne, ville_nom: str):
     """Le bloc d'un referent, ligne a ligne.
 
-    Le nom dans l'ordre naturel, puis une ligne par portee de presence,
-    les jours groupes. Alberto, 23.09.2026 : un jour par ligne avec
-    « toute la journée » repete a chaque fois se lisait comme une
-    repetition. Le participe s'accorde : « Présente les » pour une femme,
-    « Présent les » pour un homme, la forme masculine a defaut de sexe
-    connu.
+    Le nom d'usage, puis une ligne par jour de presence. Le participe
+    s'accorde : « Présente les » pour une femme, « Présent les » pour un
+    homme, la forme masculine a defaut de sexe connu.
 
     Rendu ligne a ligne et non en un seul texte : chaque ligne ira dans sa
     propre cellule. Une cellule fusionnee verticalement fait grandir sa
     PREMIERE ligne pour contenir tout le texte, ce qui deformait la bande.
     """
     lignes = [personne.get("appellation") or personne["nom"]]
-    groupes = _jours_par_portee(personne, ville_nom)
-    if groupes:
+    presences = _presences_du_referent(personne, ville_nom)
+    if presences:
         lignes.append("Présente les" if personne.get("sexe") == "F" else "Présent les")
-        for portee, jours in groupes:
-            lignes.append(_enumeration(jours) + ", " + portee)
+        lignes.extend(presences)
     return lignes
 
 
