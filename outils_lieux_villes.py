@@ -9,13 +9,17 @@ des lieux actifs et des proxs indexees ».
 
 Ce que ce module ajoute aux vues, sans rien saisir a la main :
 
-  colonne A : un bloc teal par ville, le nom incline sur la moitie haute,
-      la vignette iconique sur la moitie basse, quand la colonne Image de
-      Referentiel - Villes porte une adresse.
-  colonne B : les referents de proximite de LIEU de cette ville. Sous un
-      titre dore, sur fond creme, un bloc par personne : son nom dans
-      l'ordre naturel, puis ses jours de presence groupes par portee. Le
-      participe s'accorde au sexe.
+  colonne A : un bloc teal par ville, le nom incline sur la moitie haute
+      depuis la ligne des etages, la vignette iconique sur la moitie
+      basse, quand la colonne Image de Referentiel - Villes porte une
+      adresse.
+  colonne B : les referents de proximite de LIEU de cette ville. Un titre
+      dore sur les trois lignes de tete, puis un corps creme ou se lisent
+      le nom dans l'ordre naturel et les jours de presence groupes par
+      portee. Le participe s'accorde au sexe.
+
+Une bande sans ville, le teletravail, ne recoit rien du tout : Alberto,
+23.09.2026, « home office, pas de bloc ».
 
 D'ou viennent les trois informations, et pourquoi elles descendent seules
 
@@ -46,6 +50,12 @@ vient d'etre ecrit : aucun corps de generateur n'est recopie ici. Il
 enveloppe enfin _appliquer_largeurs, qui sans cela effacerait a chaque
 passage les largeurs du bandeau.
 
+PIEGE A CONNAITRE. _habiller_la_vue relit la feuille. Une cellule
+absorbee par une fusion s'y lit VIDE : sans _remplir_les_fusions, la
+reecriture perdrait la valeur du bas de chaque journee entiere, et la
+fusion ne serait plus reposee. C'est ce qui a fait retomber toutes les
+journees entieres sur le seul matin le 23.09.2026.
+
 Ce que le bandeau ne fait PAS. Il ne parait ni dans Propositions, la
 surface de saisie, ni dans Planification, dont la cellule de date vit en
 D1 et qu'un decalage de deux colonnes casserait. Il vit dans la Vue
@@ -64,6 +74,7 @@ from outils_lieux_socle import (
     DEMIS,
     DORE,
     ETATS_ENGAGEMENT_VIVANTS,
+    GRIS,
     ID_EFFECTIF,
     ID_LIEUX,
     ID_PATIENTS,
@@ -392,12 +403,12 @@ def _enumeration(jours):
 def _lignes_du_referent(personne, ville_nom: str):
     """Le bloc d'un referent, ligne a ligne.
 
-    Le nom dans l'ordre naturel, une ligne vide, puis une ligne par
-    portee de presence, les jours groupes. Alberto, 23.09.2026 : un jour
-    par ligne avec « toute la journée » repete a chaque fois se lisait
-    comme une repetition. Le participe s'accorde : « Présente les » pour
-    une femme, « Présent les » pour un homme, la forme masculine a defaut
-    de sexe connu.
+    Le nom dans l'ordre naturel, puis une ligne par portee de presence,
+    les jours groupes. Alberto, 23.09.2026 : un jour par ligne avec
+    « toute la journée » repete a chaque fois se lisait comme une
+    repetition. Le participe s'accorde : « Présente les » pour une femme,
+    « Présent les » pour un homme, la forme masculine a defaut de sexe
+    connu.
 
     Rendu ligne a ligne et non en un seul texte : chaque ligne ira dans sa
     propre cellule. Une cellule fusionnee verticalement fait grandir sa
@@ -406,7 +417,6 @@ def _lignes_du_referent(personne, ville_nom: str):
     lignes = [personne.get("appellation") or personne["nom"]]
     groupes = _jours_par_portee(personne, ville_nom)
     if groupes:
-        lignes.append("")
         lignes.append("Présente les" if personne.get("sexe") == "F" else "Présent les")
         for portee, jours in groupes:
             lignes.append(_enumeration(jours) + ", " + portee)
@@ -629,45 +639,46 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
         milieu = haut + (len(lignes) // 2)
 
         if ville:
-            # Le nom sur la moitie haute, la vignette sur la moitie basse,
-            # comme la maquette d'Alberto du 23.09.2026.
-            valeurs[(haut, COLONNE_VILLE)] = ville["nom"]
-            fusions.append((haut, milieu, COLONNE_VILLE, "ville"))
+            # Alberto, 23.09.2026, sur ses propres retouches : le nom est
+            # fusionne depuis la ligne des etages, et non depuis la
+            # premiere demi-journee, de sorte qu'il ait toute la moitie
+            # haute du bloc ; la vignette occupe la moitie basse.
+            valeurs[(bande["ligne_etages"], COLONNE_VILLE)] = ville["nom"]
+            fusions.append((bande["ligne_etages"], milieu, COLONNE_VILLE, "ville"))
             if ville.get("image"):
                 images[(milieu, COLONNE_VILLE)] = ville["image"]
             fusions.append((milieu, bas + 1, COLONNE_VILLE, "vignette"))
-            # Le fond teal couvre la bande entiere, ses trois lignes de tete
-            # comprises, et s'arrete a la ligne vide qui la separe de la
-            # suivante : les bandes respirent, et la couleur ne descend plus
-            # en une longue barre sous la derniere d'entre elles.
+            # Le fond teal couvre la bande entiere et s'arrete a la ligne
+            # vide qui la separe de la suivante : les bandes respirent, et
+            # la couleur ne descend plus sous la derniere d'entre elles.
             plages.append((bande["ligne_etages"], bas + 1))
+
+            # Le titre dore couvre les TROIS lignes de tete, etages, jour
+            # et numero du bureau, comme la maquette.
+            valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = ENTETE_BANDEAU
+            fusions.append((bande["ligne_etages"], bande["ligne_numeros"] + 1,
+                            COLONNE_REFERENT, "entete"))
+
+            # Le corps : une ligne de texte par ligne de grille, a partir
+            # de la premiere demi-journee, une personne apres l'autre.
+            # Rien n'est fusionne : une cellule fusionnee verticalement
+            # fait grandir sa PREMIERE ligne pour contenir tout son texte,
+            # ce qui deformait la bande.
+            gens = referents.get(_normaliser(ville["nom"]), [])
+            bloc = []
+            for personne in gens:
+                if bloc:
+                    bloc.append("")
+                bloc.extend(_lignes_du_referent(personne, ville["nom"]))
+            for i, texte in enumerate(bloc):
+                if texte and haut + i <= bas:
+                    valeurs[(haut + i, COLONNE_REFERENT)] = texte
+            fusions.append((haut, bas + 1, COLONNE_REFERENT, "creme"))
         else:
-            # Une bande sans ville, le teletravail par exemple, ne recoit ni
-            # nom ni couleur : son intitule se lit deja dans sa ligne
-            # d'en-tete, et le mot incline se coupait au lieu de se lire.
-            fusions.append((haut, bas + 1, COLONNE_VILLE, "vide"))
-
-        valeurs[(bande["ligne_etages"], COLONNE_REFERENT)] = ENTETE_BANDEAU
-        fusions.append((bande["ligne_etages"], bande["ligne_entete"] + 1,
-                        COLONNE_REFERENT, "entete"))
-
-        # Le corps : une ligne de texte par ligne de grille, une personne
-        # apres l'autre, separees par une ligne vide, et le tout centre
-        # verticalement dans la bande. Rien n'est fusionne ici : une
-        # cellule fusionnee verticalement fait grandir sa PREMIERE ligne
-        # pour contenir tout son texte, ce qui deformait la bande.
-        gens = referents.get(_normaliser(ville["nom"]) if ville else "", [])
-        bloc = []
-        for personne in gens:
-            if bloc:
-                bloc.append("")
-            bloc.extend(_lignes_du_referent(personne, ville["nom"]))
-        depart = haut + max(0, (len(lignes) - len(bloc)) // 2)
-        for i, texte in enumerate(bloc):
-            if texte and depart + i <= bas:
-                valeurs[(depart + i, COLONNE_REFERENT)] = texte
-        # Le creme court du titre au bas de la bande, sans fusion.
-        fusions.append((bande["ligne_numeros"], bas + 1, COLONNE_REFERENT, "creme"))
+            # Alberto, 23.09.2026 : « home office, pas de bloc ». Une bande
+            # sans ville ne recoit rien du tout, ni couleur, ni titre, ni
+            # contour : les deux colonnes de tete y restent blanches.
+            gens = []
 
         infos.append({
             "ville": ville["nom"] if ville else (bande["sites"][0] if bande["sites"] else ""),
@@ -704,18 +715,19 @@ def _grille_avec_bandeau(grille, sujet: str = ""):
 
 
 def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
-    """Mise en forme du bandeau, d'apres la maquette d'Alberto.
+    """Mise en forme du bandeau, d'apres les retouches d'Alberto.
 
     La colonne de gauche est un bloc teal par ville : le nom en blanc et
     incline sur la moitie haute, la vignette sur la moitie basse. La
     colonne des referents porte son titre sur fond dore, puis un corps
-    creme ou se lisent le nom et les jours de presence.
+    creme. Un filet gris moyen, celui de la charte, entoure les deux.
 
     Les images ne sont plus posees par une formule, le parametre n'est
     garde que pour la compatibilite des appels. Les plages sont les
     premieres et dernieres lignes des bandes qui portent une ville :
-    elles seules recoivent le fond teal, de sorte que la ligne vide entre
-    deux bandes et tout ce qui suit la derniere restent blancs.
+    elles seules recoivent couleur et contour, de sorte que la ligne vide
+    entre deux bandes, le teletravail et tout ce qui suit la derniere
+    restent blancs.
     """
     plages = plages or []
     # Les deux colonnes du bandeau sont d'abord defusionnees : chez les
@@ -740,14 +752,22 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
             "cell": {"userEnteredFormat": format_}, "fields": champs,
         }})
 
-    # Les deux colonnes sont d'abord rendues au blanc sur toute leur
-    # hauteur : sans quoi les couleurs d'un passage precedent, ou la vue
-    # etait plus longue, resteraient sous la derniere bande.
+    # Les deux colonnes sont d'abord rendues au blanc et sans filet sur
+    # toute leur hauteur : sans quoi couleurs et contours d'un passage
+    # precedent, ou la vue etait plus longue, resteraient sous la
+    # derniere bande.
     requetes.append({"repeatCell": {
         "range": {"sheetId": identifiant, "startColumnIndex": COLONNE_VILLE,
                   "endColumnIndex": COLONNE_REFERENT + 1},
         "cell": {"userEnteredFormat": {"backgroundColor": _rvb("#ffffff")}},
         "fields": "userEnteredFormat.backgroundColor",
+    }})
+    requetes.append({"updateBorders": {
+        "range": {"sheetId": identifiant,
+                  "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_REFERENT + 1},
+        "top": {"style": "NONE"}, "bottom": {"style": "NONE"},
+        "left": {"style": "NONE"}, "right": {"style": "NONE"},
+        "innerHorizontal": {"style": "NONE"}, "innerVertical": {"style": "NONE"},
     }})
     for debut, fin in plages:
         _peindre(debut, fin, COLONNE_VILLE, {
@@ -787,6 +807,20 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
                 "userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,"
                 "userEnteredFormat.textFormat"))
 
+    # Le contour : le meme filet gris moyen que la charte pose autour de
+    # chaque journee, ici autour du bloc de la ville et autour de la
+    # colonne des referents. Alberto l'a ajoute sur ses retouches du
+    # 23.09.2026. Une bande sans ville n'a pas de plage, donc pas de
+    # contour : le teletravail reste nu.
+    filet = {"style": "SOLID_MEDIUM", "color": _rvb(GRIS)}
+    for debut, fin in plages:
+        for colonne in (COLONNE_VILLE, COLONNE_REFERENT):
+            requetes.append({"updateBorders": {
+                "range": {"sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
+                          "startColumnIndex": colonne, "endColumnIndex": colonne + 1},
+                "top": filet, "bottom": filet, "left": filet, "right": filet,
+            }})
+
     # Les largeurs des deux colonnes sont posees par _largeurs_de_la_vue
     # pour la Vue actuelle, et ici pour la copie publiee.
     requetes.append({"updateDimensionProperties": {
@@ -803,6 +837,48 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
     # #REF! sur ce domaine. Elles sont posees en image de cellule par
     # _poser_les_vignettes, apres l'ecriture de la grille.
     return requetes
+
+
+def _remplir_les_fusions(grille, sujet: str = ""):
+    """Redonne leur valeur aux cellules absorbees par une fusion verticale.
+
+    Le defaut qu'elle repare, signale par Alberto le 23.09.2026 : « ton
+    robot a mis des presences de journee entiere sur demi-journee pour
+    tous ». Quand matin et apres-midi portent le meme occupant, la charte
+    les fusionne. Une lecture de la feuille rend alors la cellule du bas
+    VIDE, puisqu'elle est absorbee. En relisant la grille pour l'habiller,
+    puis en la reecrivant, on perdait donc la valeur du bas, et
+    _fusions_demi_journees, qui ne fusionne que deux cellules egales, ne
+    reposait plus la fusion : la journee entiere retombait sur le seul
+    matin.
+
+    On ne traite que les fusions d'UNE colonne : une fusion horizontale,
+    comme l'etiquette Étage, ne doit surtout pas voir sa valeur recopiee
+    dans les colonnes voisines, qui servent a reperer les blocs.
+    """
+    import outils_lieux_charte as _charte
+    try:
+        fusions = _charte._fusions_lues(ID_LIEUX, ONGLET_VUE, sujet=sujet)
+    except Exception as _e:  # noqa: BLE001
+        print("[lieux villes] fusions non relues : "
+              + type(_e).__name__ + " " + str(_e)[:200], flush=True)
+        return grille, 0
+    rendues = 0
+    for fusion in fusions:
+        c0, c1 = fusion["startColumnIndex"], fusion["endColumnIndex"]
+        r0, r1 = fusion["startRowIndex"], fusion["endRowIndex"]
+        if c1 - c0 != 1 or r1 - r0 < 2 or r0 >= len(grille):
+            continue
+        valeur = _cellule(grille[r0], c0)
+        if not valeur:
+            continue
+        for r in range(r0 + 1, min(r1, len(grille))):
+            while len(grille[r]) <= c0:
+                grille[r].append("")
+            if not _cellule(grille[r], c0):
+                grille[r][c0] = valeur
+                rendues += 1
+    return grille, rendues
 
 
 def _sans_le_bandeau(grille):
@@ -869,17 +945,20 @@ def _habiller_la_vue(sujet: str = ""):
     Le passage du matin ne passe pas par _generer_vue : lieux_vue_du_jour,
     du registre, reconstruit la grille pour son propre compte afin d'y
     melanger le ponctuel des agendas de salles. Plutot que de dupliquer ce
-    travail, on reprend ici ce qu'elle vient d'ecrire, on en retire les
-    bandes eteintes, on y ajoute les deux colonnes de tete et on repose
-    fusions, couleurs, vignettes et largeurs. _ecrire_grille defusionne
+    travail, on reprend ici ce qu'elle vient d'ecrire, on rend leur valeur
+    aux cellules absorbees par une fusion, on en retire les bandes
+    eteintes, on y ajoute les deux colonnes de tete et on repose fusions,
+    couleurs, contours, vignettes et largeurs. _ecrire_grille defusionne
     l'onglet avant d'ecrire, il n'y a donc rien a defaire a la main.
 
     Idempotent : une grille qui porte deja le bandeau est ramenee a sa
     forme nue avant d'etre rhabillee.
     """
-    grille = _sans_le_bandeau(_lire(ONGLET_VUE, sujet=sujet))
+    grille = [list(ligne) for ligne in _lire(ONGLET_VUE, sujet=sujet)]
     if not grille:
         return {"bandeau": False, "raison": "vue vide"}
+    grille, rendues = _remplir_les_fusions(grille, sujet=sujet)
+    grille = _sans_le_bandeau(grille)
     grille, retirees = _sans_bandes_inactives(grille, sujet=sujet)
     _rendre_les_images_lisibles(_villes(sujet=sujet))
     sortie, fusions, images, infos, plages = _grille_avec_bandeau(grille, sujet=sujet)
@@ -893,7 +972,7 @@ def _habiller_la_vue(sujet: str = ""):
     vignettes = _poser_les_vignettes(_cibles_des_vignettes(images, ID_LIEUX, ONGLET_VUE))
     _largeurs_de_la_vue(sujet=sujet)
     return {"bandes": infos, "bandes_retirees": retirees, "vignettes": vignettes,
-            "lignes": len(sortie)}
+            "lignes": len(sortie), "demi_journees_rendues": rendues}
 
 
 # -------------------------------------------------------------- les greffes
@@ -956,7 +1035,8 @@ try:
 
         La publication recopie les valeurs et les fusions de la Vue
         actuelle, puis rejoue la charte des grilles, qui ne connait pas le
-        bandeau : ses couleurs et ses images se reposent donc apres.
+        bandeau : ses couleurs, ses contours et ses images se reposent
+        donc apres.
         """
         vue = _lire(ONGLET_VUE, sujet=sujet)
         if not vue:
