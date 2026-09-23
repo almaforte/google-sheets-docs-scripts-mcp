@@ -37,10 +37,13 @@ D'ou viennent les trois informations, et pourquoi elles descendent seules
       parait aux demi-journees ou ce nom est celui de la ville de la
       bande, jamais ailleurs.
 
-Le module ne touche pas au socle : il enveloppe _squelette, pour la
-geometrie, et _generer_vue, pour l'habillage, selon le motif de greffe
-deja employe par outils_lieux_admin. Il se charge apres lui, l'ordre des
-modules etant alphabetique.
+Le module ne touche pas au socle. Il enveloppe _squelette, pour la
+geometrie, puis les deux portes par lesquelles la Vue actuelle est
+ecrite : _generer_vue, qu'emploie lieux_vue_actuelle, et
+lieux_vue_du_jour, qu'emploie le passage du matin et qui reconstruit la
+grille pour son propre compte afin d'y meler le ponctuel des agendas de
+salles. Les deux appellent le meme _habiller_la_vue, qui reprend ce qui
+vient d'etre ecrit : aucun corps de generateur n'est recopie ici.
 
 Ce que le bandeau ne fait PAS. Il ne parait ni dans Propositions, la
 surface de saisie, ni dans Planification, dont la cellule de date vit en
@@ -60,7 +63,6 @@ from outils_lieux_socle import (
     DEMIS,
     DORE,
     ETATS_ENGAGEMENT_VIVANTS,
-    GRIS,
     ID_EFFECTIF,
     ID_LIEUX,
     ID_PATIENTS,
@@ -77,10 +79,7 @@ from outils_lieux_socle import (
     _colonne,
     _date,
     _feuilles,
-    _jolie_date,
-    _journaliser,
     _lire,
-    _maintenant,
     _normaliser,
     _onglets,
     _rvb,
@@ -404,11 +403,11 @@ _IMAGES_OUVERTES = set()
 def _rendre_les_images_lisibles(villes):
     """Ouvre les vignettes en lecture par lien, une fois par vignette.
 
-    La formule IMAGE d'une feuille est evaluee par les serveurs de Google
-    sans les droits du lecteur : une image de Drive visible seulement par
-    la maison rend #REF!. Les vignettes des villes sont des dessins sans
-    contenu propre a Almaval, les ouvrir en lecture ne decouvre rien. Le
-    geste est idempotent et sans effet sur les autres fichiers du dossier.
+    Apps Script va chercher l'image a l'adresse portee par le referentiel :
+    elle doit donc etre lisible sans les droits de la maison. Les vignettes
+    des villes sont des dessins sans contenu propre a Almaval, les ouvrir
+    en lecture ne decouvre rien. Le geste est idempotent et sans effet sur
+    les autres fichiers du dossier.
     """
     ouvertes = []
     for ville in villes:
@@ -635,7 +634,13 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
     bandes et tout ce qui suit la derniere restent blancs.
     """
     plages = plages or []
-    requetes = []
+    # Les deux colonnes du bandeau sont d'abord defusionnees : chez les
+    # patients, la publication vient d'y recopier les fusions de la Vue
+    # actuelle, et une fusion qui en chevauche une autre est refusee.
+    requetes = [{"unmergeCells": {"range": {
+        "sheetId": identifiant,
+        "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_REFERENT + 1,
+    }}}]
     for debut, fin, colonne in fusions:
         requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
@@ -712,6 +717,55 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
     return requetes
 
 
+def _sans_le_bandeau(grille):
+    """La grille nue, si elle porte deja le bandeau.
+
+    Permet de rejouer l'habillage sans l'empiler : on repart toujours de
+    la grille telle que le generateur la produit, sans les deux colonnes
+    de tete.
+    """
+    porte = any(_cellule(ligne, COLONNE_REFERENT) == ENTETE_BANDEAU for ligne in grille)
+    if not porte:
+        return grille
+    nue = [list(ligne[LARGEUR_BANDEAU:]) for ligne in grille]
+    if nue and grille and grille[0]:
+        # Le titre vit en A1 de la grille habillee, il retourne en A1.
+        nue[0] = [_cellule(grille[0], 0)] + list(nue[0][1:])
+    return nue
+
+
+def _habiller_la_vue(sujet: str = ""):
+    """Pose le bandeau sur la Vue actuelle telle qu'elle vient d'etre ecrite.
+
+    Le passage du matin ne passe pas par _generer_vue : lieux_vue_du_jour,
+    du registre, reconstruit la grille pour son propre compte afin d'y
+    melanger le ponctuel des agendas de salles. Plutot que de dupliquer ce
+    travail, on reprend ici ce qu'elle vient d'ecrire, on en retire les
+    bandes eteintes, on y ajoute les deux colonnes de tete et on repose
+    fusions, couleurs et vignettes. _ecrire_grille defusionne l'onglet
+    avant d'ecrire, il n'y a donc rien a defaire a la main.
+
+    Idempotent : une grille qui porte deja le bandeau est ramenee a sa
+    forme nue avant d'etre rhabillee.
+    """
+    grille = _sans_le_bandeau(_lire(ONGLET_VUE, sujet=sujet))
+    if not grille:
+        return {"bandeau": False, "raison": "vue vide"}
+    grille, retirees = _sans_bandes_inactives(grille, sujet=sujet)
+    _rendre_les_images_lisibles(_villes(sujet=sujet))
+    sortie, fusions, images, infos, plages = _grille_avec_bandeau(grille, sujet=sujet)
+    _ol._ecrire_grille(ONGLET_VUE, sortie, sujet=sujet)
+    sid = _onglets(sujet=sujet)[ONGLET_VUE]["sheetId"]
+    requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(
+        sid, fusions, images, plages)
+    if requetes:
+        _feuilles(sujet).batchUpdate(
+            spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
+    vignettes = _poser_les_vignettes(_cibles_des_vignettes(images, ID_LIEUX, ONGLET_VUE))
+    return {"bandes": infos, "bandes_retirees": retirees, "vignettes": vignettes,
+            "lignes": len(sortie)}
+
+
 # -------------------------------------------------------------- les greffes
 
 try:
@@ -740,53 +794,21 @@ try:
     def _generer_vue_avec_bandeau(onglet: str, date_iso: str, sujet: str = ""):
         """La Vue actuelle recoit le bandeau ; les autres grilles, non.
 
-        Le corps reprend celui de _generer_vue, a qui il ajoute deux
-        colonnes avant l'ecriture : les fusions des demi-journees se
-        calculent alors sur la grille decalee, et la publication vers les
-        patients emporte le bandeau sans rien savoir de lui.
+        Le generateur d'origine fait son travail, puis _habiller_la_vue
+        reprend ce qu'il a ecrit : deux colonnes de tete, les bandes des
+        lieux eteints en moins, les couleurs et les vignettes en plus.
+        Rien du corps de _generer_vue n'est recopie ici, de sorte qu'une
+        evolution du generateur n'a pas a etre reportee.
         """
+        retour = _generer_vue_amont(onglet, date_iso, sujet=sujet)
         if onglet != ONGLET_VUE:
-            return _generer_vue_amont(onglet, date_iso, sujet=sujet)
-
-        grille = _ol._sans_bandes_calculees(_ol._sans_annexes(_ol._lire(_ol.ONGLET_GRILLE, sujet=sujet)))
-        actives = _ol._actives_au(date_iso, sujet=sujet)
-        largeur = max((len(l) for l in grille), default=0)
-        sortie = [list(l) + [""] * (largeur - len(l)) for l in grille]
-        poses = 0
-        for bloc in _blocs(grille):
-            for r, jour, demi in bloc["lignes"]:
-                for colonne, nom_bureau in bloc["bureaux"]:
-                    cle = "|".join([_normaliser(bloc["site"]),
-                                    _ol._normaliser_bureau(nom_bureau), jour, demi])
-                    occupants = actives.get(cle, [])
-                    sortie[r][colonne] = ", ".join(occupants)
-                    if occupants:
-                        poses += 1
-        titre = "Vue actuelle au " + _jolie_date(date_iso)
-        if not sortie:
-            sortie = [[titre]]
-        else:
-            sortie[0][0] = titre
-            sortie.extend(_ol._bande_teletravail(_ol._teletravail_au(date_iso, sujet=sujet)))
-
-        sortie, retirees = _sans_bandes_inactives(sortie, sujet=sujet)
-        _rendre_les_images_lisibles(_villes(sujet=sujet))
-        sortie, fusions, images, infos, plages = _grille_avec_bandeau(sortie, sujet=sujet)
-        _ol._ecrire_grille(onglet, sortie, sujet=sujet)
-        sid = _onglets(sujet=sujet)[onglet]["sheetId"]
-        requetes = _ol._fusions_demi_journees(sid, sortie) + _requetes_bandeau(sid, fusions, images, plages)
-        if requetes:
-            _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
-        vignettes = _poser_les_vignettes(
-            _cibles_des_vignettes(images, ID_LIEUX, onglet))
-        _journaliser([[_maintenant(), onglet, "Génération", date_iso, "", str(poses), "Terminé",
-                       "cellules occupées au " + _jolie_date(date_iso)
-                       + ", bandeau des villes : " + str(len(infos)) + " bandes"
-                       + (", bandes retirées : " + ", ".join(retirees) if retirees else "")]],
-                     sujet=sujet)
-        return {"onglet": onglet, "date": date_iso, "cellules_occupees": poses,
-                "lignes": len(sortie), "bandes": infos, "bandes_retirees": retirees,
-                "vignettes": vignettes}
+            return retour
+        if isinstance(retour, dict) and retour.get("erreur"):
+            return retour
+        habillage = _habiller_la_vue(sujet=sujet)
+        if isinstance(retour, dict) and isinstance(habillage, dict):
+            retour.update(habillage)
+        return retour
 
     _ol._generer_vue = _generer_vue_avec_bandeau
     print("[lieux villes] bandeau greffé sur la Vue actuelle", flush=True)
@@ -845,6 +867,32 @@ try:
     # module : le serveur garde l'objet d'origine. Le registre des lieux
     # porte deja le geste exact, employe pour le passage quotidien.
     import outils_lieux_registre as _registre
+
+    _vue_du_jour_amont = _registre.lieux_vue_du_jour.fn if hasattr(
+        _registre.lieux_vue_du_jour, "fn") else _registre.lieux_vue_du_jour
+
+    def _vue_du_jour_avec_bandeau(date: str = "", sujet: str = ""):
+        """La vue du matin recoit le bandeau, comme la Vue actuelle.
+
+        lieux_vue_du_jour reconstruit la grille pour son propre compte,
+        pour y melanger le ponctuel des agendas de salles : la greffe
+        posee sur _generer_vue ne la couvre donc pas. On la laisse faire
+        son travail, puis on habille ce qu'elle a ecrit.
+        """
+        retour = _vue_du_jour_amont(date=date, sujet=sujet)
+        if isinstance(retour, dict) and retour.get("erreur"):
+            return retour
+        habillage = _habiller_la_vue(sujet=sujet)
+        if isinstance(retour, dict) and isinstance(habillage, dict):
+            retour.update(habillage)
+        return retour
+
+    _pose_vue = _registre._remplacer_outil("lieux_vue_du_jour", _vue_du_jour_avec_bandeau)
+    if _pose_vue:
+        _registre.lieux_vue_du_jour = tolerant(_vue_du_jour_avec_bandeau)
+    print("[lieux villes] vue du jour " + ("greffée" if _pose_vue else "NON greffée")
+          + " : le passage du matin emporte le bandeau", flush=True)
+
     _pose = _registre._remplacer_outil("lieux_publier_vers_patients", _publier_avec_bandeau)
     if _pose:
         _ol.lieux_publier_vers_patients = tolerant(_publier_avec_bandeau)
