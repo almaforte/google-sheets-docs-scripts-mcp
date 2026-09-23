@@ -21,7 +21,6 @@ from outils_lieux_socle import (
     DORE,
     DORE_PALE,
     EDITEURS,
-    EDITEURS_ATTRIBUTIONS,
     FILET_LEGER,
     GRIS,
     HAUTEUR_ENTETE,
@@ -664,15 +663,27 @@ def lieux_poser_la_charte(sujet: str = ""):
     Les listes deroulantes sont BLOQUANTES et s'affichent en texte brut,
     leurs valeurs colorees par mise en forme conditionnelle. Les onglets
     de seule consultation sont proteges, avec pour seuls editeurs Alberto
-    et gestion@almaval.ch, Clement Berger en plus dans Attributions ;
-    dans cet onglet les deux colonnes de dates
-    restent ouvertes a la saisie.
+    et gestion@almaval.ch.
+
+    CETTE FONCTION NE TOUCHE PAS L'ONGLET ATTRIBUTIONS depuis le
+    23.09.2026. Cet onglet appartient a lieux_charte_attributions, qui
+    pose sa mise en forme, ses validations et sa protection, et qui
+    laisse huit colonnes ouvertes a la saisie. Les deux fonctions se
+    contredisaient : celle-ci refermait ce que l'autre ouvrait, et le
+    droit de Clement Berger disparaissait a chaque passage. Arbitrage
+    d'Alberto du 23.09.2026 : le mode ouvert devient la regle.
     """
     proprietes = _onglets(sujet=sujet)
     couleurs = _couleurs_personnes(sujet=sujet)
+    # L'onglet Attributions n'est PAS dans cette table depuis le
+    # 23.09.2026, et il n'est pas non plus dans « consultation ». Il
+    # appartient entierement a lieux_charte_attributions, seule fonction
+    # qui l'ecrit. Avant cette date, les deux se contredisaient : la
+    # charte generale refermait les six colonnes que le mode ouvert
+    # laissait a la saisie, et Clement Berger perdait son droit a chaque
+    # passage. Une protection, un ecrivain.
     familles = {
         ONGLET_REFERENTIEL: VIOLET,
-        ONGLET_ATTRIBUTIONS: VIOLET,
         ONGLET_JOURNAL: VIOLET,
         ONGLET_LISTES: VIOLET,
         ONGLET_VUE: VIOLET,
@@ -681,7 +692,7 @@ def lieux_poser_la_charte(sujet: str = ""):
         ONGLET_DEMANDES: JAUNE,
     }
     grilles_larges = (ONGLET_GRILLE, ONGLET_VUE, ONGLET_PLANIFICATION)
-    consultation = [ONGLET_REFERENTIEL, ONGLET_ATTRIBUTIONS, ONGLET_JOURNAL,
+    consultation = [ONGLET_REFERENTIEL, ONGLET_JOURNAL,
                     ONGLET_LISTES, ONGLET_VUE, ONGLET_PLANIFICATION]
 
     requetes = []
@@ -744,10 +755,7 @@ def lieux_poser_la_charte(sujet: str = ""):
                 }},
                 "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold," + masque_texte,
             }})
-            if titre == ONGLET_ATTRIBUTIONS:
-                bandes = [(0, 7, VIOLET), (7, 9, JAUNE), (9, 11, VIOLET)]
-            else:
-                bandes = [(0, colonnes, famille)]
+            bandes = [(0, colonnes, famille)]
             for c0, c1, couleur in bandes:
                 requetes.append({"addBanding": {"bandedRange": {
                     "range": {"sheetId": identifiant, "startRowIndex": 0, "endRowIndex": lignes,
@@ -840,30 +848,10 @@ def lieux_poser_la_charte(sujet: str = ""):
                 "fields": "userEnteredFormat.backgroundColor",
             }})
 
-    # Statuts du registre et dates manquantes
-    if ONGLET_ATTRIBUTIONS in proprietes:
-        sid = proprietes[ONGLET_ATTRIBUTIONS]["sheetId"]
-        entetes = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)[0]
-        i_statut = _colonne(entetes, "Statut")
-        i_debut = _colonne(entetes, "Date de début")
-        plage_statut = {"sheetId": sid, "startRowIndex": 1, "startColumnIndex": i_statut, "endColumnIndex": i_statut + 1}
-        for valeur, couleur in (("Active", "#d9ead3"), ("Proposée", "#fff2cc"), ("Terminée", "#d9d9d9"),
-                                ("Confirmée", "#d0e0e3")):
-            requetes.append({"addConditionalFormatRule": {"rule": {
-                "ranges": [plage_statut],
-                "booleanRule": {"condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": valeur}]},
-                                "format": {"backgroundColor": _rvb(couleur)}},
-            }, "index": 0}})
-        # Une proposition sans date de debut ne peut pas etre planifiee :
-        # c'est la seule date vide qui soit une faute. Une ligne Active
-        # sans date est une occupation reprise de l'ancienne grille.
-        requetes.append({"addConditionalFormatRule": {"rule": {
-            "ranges": [{"sheetId": sid, "startRowIndex": 1, "startColumnIndex": i_debut, "endColumnIndex": i_debut + 1}],
-            "booleanRule": {"condition": {"type": "CUSTOM_FORMULA", "values": [
-                {"userEnteredValue": "=ET(" + _lettre(i_debut) + "2=\"\";" + _lettre(i_statut) + "2=\"Proposée\")"}]},
-                "format": {"backgroundColor": _rvb(ROUGE)}},
-        }, "index": 0}})
-
+    # Les statuts colores et la date de debut manquante d'Attributions
+    # sont poses par lieux_charte_attributions, avec tout le reste de
+    # cet onglet. Les reposer ici les empilerait, la charte generale ne
+    # supprimant plus les regles de cet onglet.
     for titre in consultation:
         if titre not in proprietes:
             continue
@@ -874,19 +862,6 @@ def lieux_poser_la_charte(sujet: str = ""):
             "requestingUserCanEdit": True,
             "editors": {"users": EDITEURS},
         }
-        if titre == ONGLET_ATTRIBUTIONS:
-            # Clement Berger choisit le bureau a la main : il est editeur
-            # de ce seul onglet depuis le 23.09.2026. Les deux colonnes de
-            # dates restent ouvertes a tous les autres.
-            protection["editors"] = {"users": EDITEURS_ATTRIBUTIONS}
-            entetes = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)[0]
-            i_debut = _colonne(entetes, "Date de début")
-            i_fin = _colonne(entetes, "Date de fin")
-            protection["unprotectedRanges"] = [{
-                "sheetId": proprietes[titre]["sheetId"], "startRowIndex": 1,
-                "startColumnIndex": min(i_debut, i_fin), "endColumnIndex": max(i_debut, i_fin) + 1,
-            }]
-            protection["description"] = "Registre écrit par le moteur ; seules les deux dates se saisissent"
         if titre == ONGLET_PLANIFICATION:
             # La date en D1 se saisit : cellule jaune, format de date, validation bloquante.
             cellule_date = {"sheetId": proprietes[titre]["sheetId"], "startRowIndex": 0, "endRowIndex": 1,
