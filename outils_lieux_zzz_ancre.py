@@ -37,7 +37,9 @@ serveur vient de demarrer.
 
 L'ADRESSE n'est ecrite qu'a l'ecriture des vues, par l'enveloppe de
 _ecrire_grille : Vue actuelle, C et D de chaque bloc ; Planification,
-seulement le libelle « Télétravail ». Propositions n'est jamais touche.
+seulement le libelle « Télétravail », et son ancre ecrite de la couleur
+du fond. Propositions n'est jamais touche. La charte generale, qui
+repose le teal partout, est enveloppee pour recacher l'ancre ensuite.
 
 Le TITRE du bandeau disparait quand la ville n'a aucun referent : Alberto,
 « si personne inscrite, la phrase devrait disparaitre tout court ». Le
@@ -58,6 +60,9 @@ import sys
 import outils_lieux as _ol
 import outils_lieux_socle as _socle
 import outils_lieux_villes as _villes
+from main import tolerant
+import outils_lieux_charte as _charte
+import outils_lieux_registre as _registre
 from outils_lieux_socle import (
     ANNEXES,
     DEMIS,
@@ -70,8 +75,10 @@ from outils_lieux_socle import (
     SITE_TELETRAVAIL,
     _cellule,
     _colonne,
+    _feuilles,
     _lire,
     _normaliser,
+    _onglets,
     _rvb,
 )
 
@@ -240,6 +247,43 @@ def _adresser(grille, avec_adresses: bool):
     return retouches
 
 
+def _cacher_l_ancre_du_teletravail(onglet: str, grille=None, sujet: str = ""):
+    """Ecrit l'ancre de la bande du teletravail de la couleur de son fond.
+
+    Dans la Vue actuelle le bandeau s'en charge ; ici, la Planification,
+    qui n'a pas de bandeau, et toute grille que la charte generale vient
+    de reposer. La grille est celle qui vient d'etre ecrite si on l'a,
+    sinon la feuille est relue. L'echec n'arrete rien : l'etiquette reste
+    alors lisible, la vue reste juste.
+    """
+    try:
+        if grille is None:
+            grille = _lire(onglet, ID_LIEUX, sujet=sujet)
+        requetes = []
+        identifiant = None
+        for bloc in _blocs(grille):
+            if _normaliser(bloc["site"]) != _normaliser(SITE_TELETRAVAIL):
+                continue
+            if identifiant is None:
+                identifiant = _onglets(ID_LIEUX, sujet=sujet)[onglet]["sheetId"]
+            r, c = bloc["ligne_entete"] + 1, bloc["colonne_jour"]
+            requetes.append({"repeatCell": {
+                "range": {"sheetId": identifiant,
+                          "startRowIndex": r, "endRowIndex": r + 1,
+                          "startColumnIndex": c, "endColumnIndex": c + 2},
+                "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": _rvb(DORE_PALE)}}},
+                "fields": "userEnteredFormat.textFormat.foregroundColor",
+            }})
+        if requetes:
+            _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX,
+                                         body={"requests": requetes}).execute()
+        return len(requetes)
+    except Exception as _e:  # noqa: BLE001
+        print("[lieux ancre] ancre du teletravail non cachee sur " + onglet + " : "
+              + type(_e).__name__ + " " + str(_e)[:200], flush=True)
+        return 0
+
+
 # ---------------------------------------------------------------- greffes
 
 try:
@@ -270,7 +314,10 @@ try:
             except Exception as _e:  # noqa: BLE001
                 print("[lieux ancre] adresses non posees sur " + onglet + " : "
                       + type(_e).__name__ + " " + str(_e)[:200], flush=True)
-        return _ecrire_amont(onglet, grille, sujet=sujet)
+        retour = _ecrire_amont(onglet, grille, sujet=sujet)
+        if onglet == ONGLET_PLANIFICATION:
+            _cacher_l_ancre_du_teletravail(onglet, grille, sujet=sujet)
+        return retour
 
     _ol._ecrire_grille = _ecrire_grille_adressee
     print("[lieux ancre] _ecrire_grille greffee : adresses en C et D des vues", flush=True)
@@ -342,6 +389,29 @@ try:
           "ancre du teletravail invisible", flush=True)
 except Exception as _exc:  # noqa: BLE001
     print("[lieux ancre] bandeau non greffe : " + type(_exc).__name__ + " " + str(_exc)[:200],
+          flush=True)
+
+try:
+    _charte_amont = _charte.lieux_poser_la_charte.fn if hasattr(
+        _charte.lieux_poser_la_charte, "fn") else _charte.lieux_poser_la_charte
+
+    def _charte_puis_ancre_cachee(sujet: str = ""):
+        """La charte generale repose le teal partout : l'ancre du teletravail
+        est ensuite rendue a la couleur de son fond dans les deux vues."""
+        retour = _charte_amont(sujet=sujet)
+        for onglet in (ONGLET_VUE, ONGLET_PLANIFICATION):
+            _cacher_l_ancre_du_teletravail(onglet, sujet=sujet)
+        return retour
+
+    _pose_charte = _registre._remplacer_outil("lieux_poser_la_charte", _charte_puis_ancre_cachee)
+    if _pose_charte:
+        for _module in (_charte, _registre, _ol):
+            if hasattr(_module, "lieux_poser_la_charte"):
+                _module.lieux_poser_la_charte = tolerant(_charte_puis_ancre_cachee)
+    print("[lieux ancre] charte generale " + ("greffee" if _pose_charte else "NON greffee")
+          + " : ancre du teletravail cachee apres sa pose", flush=True)
+except Exception as _exc:  # noqa: BLE001
+    print("[lieux ancre] charte non greffee : " + type(_exc).__name__ + " " + str(_exc)[:200],
           flush=True)
 
 _alias_sans_faute()
