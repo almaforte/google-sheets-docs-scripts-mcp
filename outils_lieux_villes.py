@@ -94,9 +94,9 @@ LARGEUR_BANDEAU = 2
 COLONNE_VILLE = 0
 COLONNE_REFERENT = 1
 ENTETE_BANDEAU = "Référent.s de proximité par lieu"
-LARGEUR_COLONNE_VILLE = 150
+LARGEUR_COLONNE_VILLE = 160
 LARGEUR_COLONNE_REFERENT = 200
-TAILLE_NOM_DE_VILLE = 18
+TAILLE_NOM_DE_VILLE = 20
 CREME = "#fff2cc"
 
 # Le deploiement versionne du projet « Almaval - RH - Onboarding des
@@ -580,8 +580,9 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
 
     Les valeurs sont {(ligne, colonne): texte}. Les fusions portent leur
     role, de sorte que la mise en forme sache quoi peindre : « ville » et
-    « vignette » pour la colonne de gauche, « entete » et « corps » pour
-    celle des referents. Les images sont {(ligne, colonne): adresse}.
+    « vignette » pour la colonne de gauche, « entete », « corps » et
+    « creme » pour celle des referents. Les images sont {(ligne, colonne):
+    adresse}.
     """
     valeurs, fusions, images, infos, plages = {}, [], {}, [], []
     for bande in _bandes(grille):
@@ -618,12 +619,19 @@ def _contenu_du_bandeau(grille, villes, batiments, referents):
                         COLONNE_REFERENT, "entete"))
 
         # Le corps : un seul bloc de texte pour toute la bande, une
-        # personne apres l'autre, separees par une ligne vide.
+        # personne apres l'autre, separees par une ligne vide. Il commence
+        # a la premiere demi-journee et non a la ligne des numeros de
+        # bureau : dans une cellule fusionnee verticalement, c'est la
+        # PREMIERE ligne qui grandit pour contenir le texte, et la ligne
+        # des numeros se retrouvait haute de six lignes.
         gens = referents.get(_normaliser(ville["nom"]) if ville else "", [])
         if gens:
-            valeurs[(bande["ligne_numeros"], COLONNE_REFERENT)] = "\n\n".join(
+            valeurs[(haut, COLONNE_REFERENT)] = "\n\n".join(
                 _texte_du_referent(personne, ville["nom"]) for personne in gens)
-        fusions.append((bande["ligne_numeros"], bas + 1, COLONNE_REFERENT, "corps"))
+        fusions.append((haut, bas + 1, COLONNE_REFERENT, "corps"))
+        # La ligne des numeros reste seule, mais du meme creme, pour que la
+        # colonne n'ait pas de trou entre son titre et son corps.
+        fusions.append((bande["ligne_numeros"], haut, COLONNE_REFERENT, "creme"))
 
         infos.append({
             "ville": ville["nom"] if ville else (bande["sites"][0] if bande["sites"] else ""),
@@ -682,7 +690,7 @@ def _requetes_bandeau(identifiant: int, fusions, images=None, plages=None):
         "startColumnIndex": COLONNE_VILLE, "endColumnIndex": COLONNE_REFERENT + 1,
     }}}]
     for debut, fin, colonne, _role in fusions:
-        if fin <= debut:
+        if fin <= debut or _role == "creme":
             continue
         requetes.append({"mergeCells": {"mergeType": "MERGE_ALL", "range": {
             "sheetId": identifiant, "startRowIndex": debut, "endRowIndex": fin,
@@ -964,7 +972,6 @@ def lieux_bandeau_villes(confirmer: bool = False, sujet: str = ""):
     villes = _villes(sujet=sujet)
     batiments = _batiments(sujet=sujet)
     referents = _referents_de_lieu(sujet=sujet)
-    par_nom = {v["nom"]: v for v in villes}
     etat = {
         "villes_actives": [v["nom"] for v in villes],
         "villes_avec_image": [v["nom"] for v in villes if v.get("image")],
@@ -977,10 +984,11 @@ def lieux_bandeau_villes(confirmer: bool = False, sujet: str = ""):
         "ordre_des_bandes": _ordre_des_bandes(sujet=sujet),
         "referents": {},
     }
-    for nom, ville in par_nom.items():
-        gens = referents.get(_normaliser(nom), [])
+    for ville in villes:
+        gens = referents.get(_normaliser(ville["nom"]), [])
         if gens:
-            etat["referents"][nom] = [_texte_du_referent(personne, nom) for personne in gens]
+            etat["referents"][ville["nom"]] = [
+                _texte_du_referent(personne, ville["nom"]) for personne in gens]
     if confirmer:
         etat["publication"] = _reposer_le_bandeau_chez_patients(sujet=sujet)
     return etat
