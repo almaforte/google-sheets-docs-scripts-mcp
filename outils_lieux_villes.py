@@ -848,6 +848,11 @@ try:
     _pose = _registre._remplacer_outil("lieux_publier_vers_patients", _publier_avec_bandeau)
     if _pose:
         _ol.lieux_publier_vers_patients = tolerant(_publier_avec_bandeau)
+        # Le registre a importe la fonction dans ses propres globales avant
+        # que ce module ne soit charge : sans ce second remplacement, le
+        # passage du matin publierait par l'ancienne, et la copie chez les
+        # patients perdrait chaque jour ses couleurs et ses vignettes.
+        _registre.lieux_publier_vers_patients = tolerant(_publier_avec_bandeau)
     print("[lieux villes] publication vers les patients "
           + ("greffée" if _pose else "NON greffée") + " : bandeau et vignettes", flush=True)
 except Exception as _exc:  # noqa: BLE001
