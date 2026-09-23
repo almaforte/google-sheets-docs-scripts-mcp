@@ -63,8 +63,83 @@ PLAFOND_PLAGES_PAR_FORMAT = 60
 PLAFOND_CELLULES_DETAIL = 3000
 
 
+def _masque(*morceaux: str) -> str:
+    """Assemble un masque de champs et refuse d'en rendre un bancal.
+
+    Incident du 23.09.2026, et raison d'être de cette fonction.
+    lire_formats répondait « HTTP 400, Request contains an invalid
+    argument » sur TOUTES les plages, de TOUS les classeurs, depuis
+    TOUTES les boîtes. La cause n'était ni la plage, ni le classeur, ni
+    les droits : le masque de champs portait une parenthèse fermante de
+    trop, sept ouvrantes contre huit fermantes. L'API rejetait donc la
+    requête avant même de regarder ce qu'on lui demandait, et l'outil de
+    relecture des formats était mort depuis sa mise en service sans que
+    rien ne le signale. Le contrôle du chantier CA 2 s'est retrouvé sans
+    preuve de charte à cause de ce seul caractère.
+
+    La leçon est qu'un masque est du code, et qu'un caractère de trop y
+    coûte un outil entier. Un masque déséquilibré ne part donc plus :
+    cette fonction rend une chaîne vide, l'appelant lit alors sans
+    masque, la réponse est plus lourde mais elle arrive.
+    """
+    masque = "".join(morceaux)
+    profondeur = 0
+    for caractere in masque:
+        if caractere == "(":
+            profondeur += 1
+        elif caractere == ")":
+            profondeur -= 1
+            if profondeur < 0:
+                return ""
+    return masque if profondeur == 0 else ""
+
+
+CHAMPS_FORMATS = _masque(
+    "properties(title),",
+    "sheets(properties(sheetId,title),",
+    "data(startRow,startColumn,rowData(values(",
+    "formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle,",
+    "horizontalAlignment,verticalAlignment,wrapStrategy,numberFormat,",
+    "borders,textFormat)))))",
+)
+
+CHAMPS_CONDITIONNELS = _masque(
+    "properties(title),",
+    "sheets(properties(sheetId,title),conditionalFormats)",
+)
+
+
 def _feuilles(sujet: str = ""):
     return service("sheets", "v4", SCOPES_SHEETS, sujet).spreadsheets()
+
+
+def _lire_classeur(sujet: str, masque: str, **parametres):
+    """Un get() sur l'API Sheets, qu'un masque refusé ne doit pas tuer.
+
+    Le masque est un confort : il allège la réponse. Ce n'est jamais une
+    condition de la lecture. Si l'API le refuse, on relit sans lui et on
+    le dit, plutôt que de rendre une erreur de transport opaque pour un
+    problème de forme. La réponse porte alors la clé « avertissement »,
+    que l'appelant recopie dans son résultat.
+    """
+    if masque:
+        try:
+            return _feuilles(sujet).get(fields=masque, **parametres).execute()
+        except Exception as souci:
+            reponse = _feuilles(sujet).get(**parametres).execute()
+            reponse["avertissement"] = (
+                "Le masque de champs a été refusé par l'API, la lecture a été "
+                "refaite sans lui. À corriger dans outils_formats.py. Détail : "
+                + str(souci)[:300]
+            )
+            return reponse
+    reponse = _feuilles(sujet).get(**parametres).execute()
+    reponse["avertissement"] = (
+        "Masque de champs déséquilibré, donc écarté par _masque() avant "
+        "l'appel. La lecture est complète mais plus lourde. À corriger dans "
+        "outils_formats.py."
+    )
+    return reponse
 
 
 def _lettre(indice: int) -> str:
@@ -214,6 +289,10 @@ def lire_formats(
         faut pour contrôler un encadrement.
     detail : vrai ajoute le tableau cellule par cellule, plafonné. À
         n'utiliser que pour une petite plage.
+    sujet : la boîte à impersonner, vide pour celle du serveur. Ce
+        champ attend une ADRESSE, pas un intitulé de mission : y mettre
+        autre chose fait échouer l'appel sur « Invalid impersonation
+        sub field ».
 
     Les cellules sont regroupées par mise en forme identique : la
     réponse porte les mises en forme DISTINCTES, chacune avec le nombre
@@ -233,22 +312,12 @@ def lire_formats(
     if not plage:
         return {"erreur": "aucune plage donnée"}
 
-    reponse = (
-        _feuilles(sujet)
-        .get(
-            spreadsheetId=spreadsheet_id,
-            ranges=[plage],
-            includeGridData=True,
-            fields=(
-                "properties(title),"
-                "sheets(properties(sheetId,title),"
-                "data(startRow,startColumn,rowData(values("
-                "formattedValue,effectiveFormat(backgroundColor,backgroundColorStyle,"
-                "horizontalAlignment,verticalAlignment,wrapStrategy,numberFormat,"
-                "borders,textFormat))))))"
-            ),
-        )
-        .execute()
+    reponse = _lire_classeur(
+        sujet,
+        CHAMPS_FORMATS,
+        spreadsheetId=spreadsheet_id,
+        ranges=[plage],
+        includeGridData=True,
     )
 
     feuilles = reponse.get("sheets") or []
@@ -316,6 +385,8 @@ def lire_formats(
             "lire_formats_conditionnels sur le même onglet."
         ),
     }
+    if reponse.get("avertissement"):
+        resultat["avertissement"] = reponse["avertissement"]
     if len(formats) > PLAFOND_FORMATS:
         resultat["formats_tronques"] = len(formats) - PLAFOND_FORMATS
     if detail:
@@ -360,6 +431,8 @@ def lire_formats_conditionnels(spreadsheet_id: str, onglet: str = "", sujet: str
     spreadsheet_id : le classeur.
     onglet : le titre exact d'un onglet pour s'y limiter ; vide, tous
         les onglets qui portent au moins une règle.
+    sujet : la boîte à impersonner, vide pour celle du serveur. Ce
+        champ attend une ADRESSE, pas un intitulé de mission.
 
     Pour chaque règle, dans l'ordre où l'API les rend, qui est l'ordre
     d'application : son rang, ses plages en notation A1, le type de
@@ -377,16 +450,10 @@ def lire_formats_conditionnels(spreadsheet_id: str, onglet: str = "", sujet: str
 
     N'écrit rien, jamais.
     """
-    reponse = (
-        _feuilles(sujet)
-        .get(
-            spreadsheetId=spreadsheet_id,
-            fields=(
-                "properties(title),"
-                "sheets(properties(sheetId,title),conditionalFormats)"
-            ),
-        )
-        .execute()
+    reponse = _lire_classeur(
+        sujet,
+        CHAMPS_CONDITIONNELS,
+        spreadsheetId=spreadsheet_id,
     )
 
     cible = str(onglet or "").strip()
@@ -439,7 +506,7 @@ def lire_formats_conditionnels(spreadsheet_id: str, onglet: str = "", sujet: str
 
     if cible and not onglets:
         return {"erreur": "onglet introuvable : " + cible}
-    return {
+    resultat = {
         "classeur": (reponse.get("properties") or {}).get("title", ""),
         "onglets": onglets,
         "regles_totales": sum(o["regles"] for o in onglets),
@@ -449,3 +516,6 @@ def lire_formats_conditionnels(spreadsheet_id: str, onglet: str = "", sujet: str
             "la mise en forme posée sur les cellules."
         ),
     }
+    if reponse.get("avertissement"):
+        resultat["avertissement"] = reponse["avertissement"]
+    return resultat
