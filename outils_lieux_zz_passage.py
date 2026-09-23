@@ -106,9 +106,9 @@ d'onboarding. Revenu en arriere le jour meme : le registre garde des
 valeurs, Registre - Postes admin ne declare que le NOM du poste tenu dans
 chaque service.
 
-Ce module ne reecrit pas outils_lieux_transitoire : il enveloppe son
+Ce module ne reecrit pas outils_lieux_registre : il enveloppe son
 passage quotidien et remplace l'outil deja enregistre, exactement comme
-transitoire enveloppe outils_lieux. Son nom le fait charger apres lui,
+le registre enveloppe outils_lieux. Son nom le fait charger apres lui,
 bootstrap important les modules outils_*.py dans l'ordre alphabetique.
 
 Un echec de l'un de ces gestes ne fait pas tomber le passage : il est
@@ -123,7 +123,7 @@ from main import mcp, tolerant
 import outils_lieux
 import outils_lieux_admin
 import outils_lieux_ponctuel
-import outils_lieux_transitoire
+import outils_lieux_registre
 from outils_lieux_socle import ID_EFFECTIF, _ecrire, _feuilles, _lettre, _lire, _normaliser
 
 
@@ -364,7 +364,7 @@ def lieux_passage_quotidien(sujet: str = ""):
     """
     aplatissement = _tenter(
         "aplatissement de Propositions",
-        outils_lieux_transitoire.lieux_construire_attributions, sujet=sujet)
+        outils_lieux_registre.lieux_construire_attributions, sujet=sujet)
     resultat = _passage_d_origine(sujet=sujet)
     if not isinstance(resultat, dict):
         resultat = {"passage": resultat}
@@ -392,18 +392,18 @@ def lieux_passage_quotidien(sujet: str = ""):
     return resultat
 
 
-_passage_d_origine = outils_lieux_transitoire.lieux_passage_quotidien
+_passage_d_origine = outils_lieux_registre.lieux_passage_quotidien
 
 _remplace = False
 try:
-    _remplace = outils_lieux_transitoire._remplacer_outil(
+    _remplace = outils_lieux_registre._remplacer_outil(
         "lieux_passage_quotidien", lieux_passage_quotidien)
     if _remplace:
         # Le routeur « action:quotidien » de lieux_cycle appelle le nom tel
-        # qu'il vit dans les globales de transitoire : il faut donc l'y
+        # qu'il vit dans les globales du registre : il faut donc l'y
         # remplacer aussi, sans quoi le pont continuerait de servir l'ancien
         # passage aux clients dont la liste d'outils n'est pas a jour.
-        outils_lieux_transitoire.lieux_passage_quotidien = tolerant(lieux_passage_quotidien)
+        outils_lieux_registre.lieux_passage_quotidien = tolerant(lieux_passage_quotidien)
 except Exception as _exc:  # noqa: BLE001
     print("[lieux passage] passage quotidien non remplacé : "
           + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
