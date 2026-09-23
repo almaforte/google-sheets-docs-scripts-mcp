@@ -57,6 +57,7 @@ from outils_lieux_socle import (
     DEMIS,
     DORE,
     EDITEURS,
+    EDITEURS_ATTRIBUTIONS,
     ETATS_ENGAGEMENT_VIVANTS,
     FUSEAU,
     ID_EFFECTIF,
@@ -492,7 +493,11 @@ def lieux_charte_attributions(sujet: str = ""):
         "description": ("Registre en mode transitoire : Clé, Identifiant du bureau, Statut, "
                         "Fin selon registre RH et Origine restent au moteur"),
         "warningOnly": False, "requestingUserCanEdit": True,
-        "editors": {"users": EDITEURS}, "unprotectedRanges": ouvertes}}})
+        # Clement Berger est editeur de ce seul onglet depuis le
+        # 23.09.2026. Sans cette ligne, chaque passage quotidien lui
+        # retirait le droit qu'il venait de recevoir. Les colonnes
+        # ouvertes ci-dessous restent ouvertes a tout le monde.
+        "editors": {"users": EDITEURS_ATTRIBUTIONS}, "unprotectedRanges": ouvertes}}})
 
     _feuilles(sujet).batchUpdate(spreadsheetId=ID_LIEUX, body={"requests": requetes}).execute()
     _journaliser([[_maintenant(), "Charte", "Attributions, mode transitoire", ONGLET_ATTRIBUTIONS, "",
