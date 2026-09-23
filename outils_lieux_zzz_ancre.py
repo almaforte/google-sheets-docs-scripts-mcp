@@ -20,10 +20,11 @@ L'ANCRE devient l'etiquette « Numéro du bureau », a la ligne suivante,
 meme colonne, presente dans toute grille, saisie comme vues, et que
 personne ne veut changer. L'en-tete est la ligne au-dessus, la ligne des
 etages deux au-dessus. Le mot « Jour » n'est plus requis nulle part ; il
-reste dans Propositions, ou il ne gene pas. Dans la bande du teletravail
-l'etiquette est gardee, elle porte l'ancre, mais ecrite de la couleur du
-fond : Alberto, « tu peux le colorer comme le fond, si besoin de
-l'ancre ».
+reste dans Propositions, ou il ne gene pas, et il reste compris comme
+ancre par compatibilite, la facade de la vue admin le portant encore.
+Dans la bande du teletravail l'etiquette est gardee, elle porte l'ancre,
+mais ecrite de la couleur du fond : Alberto, « tu peux le colorer comme
+le fond, si besoin de l'ancre ».
 
 La CLE passe par un alias. _blocs lit la cellule D de l'en-tete et la
 traduit par ALIAS_SITES avant de la poser dans bloc["site"] : une rue
@@ -135,8 +136,9 @@ def _alias_sans_faute(sujet: str = ""):
 def _blocs(grille):
     """Repere les blocs de la grille sans jamais coder une lettre en dur.
 
-    Un bloc s'ancre a toute cellule qui vaut « Numéro du bureau ». La
-    ligne au-dessus est l'en-tete : sa cellule suivante porte le site,
+    Un bloc s'ancre a toute cellule qui vaut « Numéro du bureau », ou,
+    par compatibilite, « Jour ». La ligne d'en-tete porte, apres cette
+    colonne, le site,
     lu a travers ALIAS_SITES, puis viennent les bureaux jusqu'a la
     premiere cellule vide. Les lignes sous l'ancre portent les
     demi-journees. Meme contrat de sortie que le _blocs du socle.
@@ -144,14 +146,24 @@ def _blocs(grille):
     if not ALIAS_SITES:
         _alias_sans_faute()
     cible = _normaliser(LIBELLE_NUMERO)
+    ancien = "JOUR"
     reperes = []
+    vus = set()
     for r, ligne in enumerate(grille):
-        if r == 0:
-            continue
         for c, valeur in enumerate(ligne):
-            if _normaliser(valeur) != cible:
+            # L'ancre nouvelle est l'etiquette des numeros, une ligne sous
+            # l'en-tete. L'ancienne, le mot « Jour » sur l'en-tete meme,
+            # reste comprise : la facade de la vue admin et Propositions
+            # la portent encore, et une grille peut porter les deux.
+            if _normaliser(valeur) == cible and r >= 1:
+                r_entete = r - 1
+            elif _normaliser(valeur) == ancien:
+                r_entete = r
+            else:
                 continue
-            entete = grille[r - 1]
+            if (r_entete, c) in vus:
+                continue
+            entete = grille[r_entete]
             site_lu = _cellule(entete, c + 1)
             if not site_lu:
                 continue
@@ -163,8 +175,9 @@ def _blocs(grille):
                 k += 1
             if not bureaux:
                 continue
+            vus.add((r_entete, c))
             lignes, annexes = [], {}
-            rr = r + 1
+            rr = r_entete + 2
             jour_courant = ""
             while rr < len(grille):
                 demi = str(_cellule(grille[rr], c + 1)).strip()
@@ -178,12 +191,12 @@ def _blocs(grille):
                     break
                 rr += 1
             reperes.append({
-                "ligne_entete": r - 1,
+                "ligne_entete": r_entete,
                 "colonne_jour": c,
                 "colonne_demi": c + 1,
                 "site": site,
                 "bureaux": bureaux,
-                "premiere_ligne": r + 1,
+                "premiere_ligne": r_entete + 2,
                 "fin": rr,
                 "lignes": lignes,
                 "annexes": annexes,
