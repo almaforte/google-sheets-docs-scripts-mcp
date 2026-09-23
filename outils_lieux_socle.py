@@ -93,6 +93,12 @@ ONGLET_ARCHIVE_GRILLE = "Archive - Grille 2026"
 ONGLET_ARCHIVE_PROPOSITIONS = "Archive - Propositions 2026"
 
 EDITEURS = ["am.forte@almaval.ch", "gestion@almaval.ch"]
+# Le registre des attributions a un editeur de plus depuis le 23.09.2026 :
+# c'est Clement Berger qui choisit le bureau, le moteur ne posant que la
+# personne, le jour et la ville. Sans cette ligne, chaque passage de la
+# charte lui retirait le droit qu'il venait de recevoir, ce qu'il a
+# constate deux fois. Les autres onglets de consultation restent fermes.
+EDITEURS_ATTRIBUTIONS = EDITEURS + ["c.berger@almaval.ch"]
 DOMAINE = "almaval.ch"
 GROUPE_INVENTAIRE = "equipe.inventaire@almaval.ch"
 COMPTE_MOTEUR = "gestion@almaval.ch"
