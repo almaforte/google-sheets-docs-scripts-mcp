@@ -21,6 +21,7 @@ from outils_lieux_socle import (
     DORE,
     DORE_PALE,
     EDITEURS,
+    EDITEURS_ATTRIBUTIONS,
     FILET_LEGER,
     GRIS,
     HAUTEUR_ENTETE,
@@ -663,7 +664,8 @@ def lieux_poser_la_charte(sujet: str = ""):
     Les listes deroulantes sont BLOQUANTES et s'affichent en texte brut,
     leurs valeurs colorees par mise en forme conditionnelle. Les onglets
     de seule consultation sont proteges, avec pour seuls editeurs Alberto
-    et gestion@almaval.ch ; dans Attributions, les deux colonnes de dates
+    et gestion@almaval.ch, Clement Berger en plus dans Attributions ;
+    dans cet onglet les deux colonnes de dates
     restent ouvertes a la saisie.
     """
     proprietes = _onglets(sujet=sujet)
@@ -873,6 +875,10 @@ def lieux_poser_la_charte(sujet: str = ""):
             "editors": {"users": EDITEURS},
         }
         if titre == ONGLET_ATTRIBUTIONS:
+            # Clement Berger choisit le bureau a la main : il est editeur
+            # de ce seul onglet depuis le 23.09.2026. Les deux colonnes de
+            # dates restent ouvertes a tous les autres.
+            protection["editors"] = {"users": EDITEURS_ATTRIBUTIONS}
             entetes = _lire(ONGLET_ATTRIBUTIONS, sujet=sujet)[0]
             i_debut = _colonne(entetes, "Date de début")
             i_fin = _colonne(entetes, "Date de fin")
