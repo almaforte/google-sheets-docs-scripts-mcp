@@ -215,12 +215,17 @@ def _requetes_regle(feuilles):
             if actuels == sorted(voulus) and not editeurs.get("groups") \
                     and not editeurs.get("domainUsersCanEdit") and not p.get("warningOnly"):
                 continue
+            # Les plages laissees ouvertes sont renvoyees telles quelles : une
+            # mise a jour des seuls editeurs les a effacees le 26.09.2026 a
+            # 21h20 (Attributions et la date de Planification), malgre le
+            # masque de champs. Retablies aussitot.
             requetes.append({"updateProtectedRange": {
                 "protectedRange": {"protectedRangeId": p["protectedRangeId"],
                                    "warningOnly": False,
+                                   "unprotectedRanges": list(p.get("unprotectedRanges", [])),
                                    "editors": {"users": voulus, "groups": [],
                                                "domainUsersCanEdit": False}},
-                "fields": "warningOnly,editors"}})
+                "fields": "warningOnly,editors,unprotectedRanges"}})
             constats.append(titre + " : " + ", ".join(actuels or ["(aucun)"]) + " -> " + ", ".join(voulus))
         if titre.startswith("Archive") and not any(_plage_entiere(sid, p.get("range", {})) for p in protections):
             requetes.append({"addProtectedRange": {"protectedRange": {
