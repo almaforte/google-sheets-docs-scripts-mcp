@@ -12,8 +12,8 @@ from main import mcp, tolerant
 
 import outils_lieux
 from outils_zzzzz_distributeur import (
-    _classeur, _est_vide, _lire_abonnements, _lire_grille, _onglet, _rogner_fin, _valider,
-    construire_sortie, norm, normv, serialiser,
+    _CACHE_CLASSEURS, _CACHE_GRILLES, _classeur, _est_vide, _lire_abonnements, _lire_grille, _onglet,
+    _rogner_fin, _valider, construire_sortie, norm, normv, serialiser,
 )
 
 
@@ -67,6 +67,8 @@ def _lignes_prevues(ab, sortie):
 def comparer_tout(planifie=True, lignes=None, exemples=3):
     """Compare, sans rien ecrire, ce que le passage ecrirait a ce qui est en
     place dans chaque onglet distribue. Sert a prouver un portage."""
+    _CACHE_CLASSEURS.clear()
+    _CACHE_GRILLES.clear()
     lecture = _lire_abonnements()
     selection = [a for a in lecture["abonnements"] if a["actif"] and (not planifie or a["frequence"] == "quotidienne")]
     if lignes:
@@ -100,6 +102,7 @@ def comparer_tout(planifie=True, lignes=None, exemples=3):
         sortie.append(detail)
     return {"compares": len(sortie), "identiques": sum(1 for d in sortie if d.get("identique")),
             "differents": [d for d in sortie if not d.get("identique")]}
+
 
 
 @mcp.tool()
