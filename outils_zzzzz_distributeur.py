@@ -20,15 +20,22 @@ CE QUI CHANGE, et rien d'autre.
    service impersonnant gestion@almaval.ch, quel que soit le serveur
    appele. Les protections posees sur les onglets distribues n'ont donc plus
    qu'un editeur, gestion@, et am.forte@ n'y ecrit plus.
-2. Les dates. Apps Script portait des objets Date ; ici une cellule est lue
-   deux fois, valeur brute et valeur affichee, et une valeur brute numerique
-   dont l'affichage est une date repart en date, au format dd.mm.yyyy de la
-   maison (ou avec l'heure quand l'affichage en portait une). Les nombres
-   restent des nombres, les textes des textes : aucune cellule ne repasse
-   par l'interpretation « comme au clavier », qui aurait transforme un GLN
-   en nombre ou un « 1.5 » en decimal.
-3. La correction du 23.09.2026 (fichier 31) est repliee : une case Actif
-   vide a la source reste vide au miroir.
+2. Les dates et les textes. Apps Script portait des objets Date ; ici une
+   cellule est lue avec sa valeur effective et son affichage, et une valeur
+   numerique dont l'affichage est une date repart en date, au format
+   dd.mm.yyyy de la maison (ou avec l'heure quand l'affichage en portait
+   une). Un texte fait d'un seul nombre repart en nombre, comme le faisait
+   setValues (un RCC « 657822 » devenait 657822, et les classeurs abonnes
+   en dependent). Un texte qui ressemble a une date, lui, reste un texte :
+   setValues transformait « 09.2031 » en numero de serie 48092, affiche tel
+   quel dans les copies. Defaut corrige au portage.
+3. Les valeurs retirees. La correction du 23.09.2026 (fichier « 31 Actif
+   vide au miroir ») est repliee : une case Actif vide a la source reste
+   vide au miroir. Elle n'etait pas effective dans Apps Script : le
+   26.09.2026 au soir, « Medecin », « Psychologue psychotherapeute »,
+   « Psychologue assistant » et « Physiotherapeute », dont la case Actif est
+   vide a la source, portaient encore « x » dans toutes les copies, et le
+   passage du matin les disait inchangees.
 4. Pas de budget de six minutes ni de reprise par declencheur : le passage
    va au bout, sous un verrou de processus.
 5. Le passage de nuit est appele par la tache planifiee « Almaval - Listes -
@@ -120,8 +127,22 @@ def _est_vide(v):
     return v is None or v == ""
 
 
+def _coercer(v):
+    """Un texte qui n'est fait que d'un nombre devient un nombre, comme le
+    faisait setValues d'Apps Script (un RCC « 657822 » repartait en 657822).
+    Une date en texte, elle, reste un texte : « 09.2031 » ne devient plus le
+    numero de serie 48092, defaut corrige au portage."""
+    if isinstance(v, str) and _RE_NOMBRE_TEXTE.match(v) and not _RE_MOIS_ANNEE.match(v):
+        try:
+            return float(v.strip())
+        except ValueError:
+            return v
+    return v
+
+
 def _cellule_api(v):
     """Une CellData pour updateCells, typee comme l'etait la valeur lue."""
+    v = _coercer(v)
     if _est_vide(v):
         return {"userEnteredValue": {"stringValue": ""}}
     if isinstance(v, bool):
@@ -264,8 +285,7 @@ def _classeur(lien_ou_id, rafraichir=False):
     """Titre et onglets d'un classeur (titre, sheetId, lignes, colonnes, gel)."""
     ident = extraire_id(lien_ou_id)
     if rafraichir or ident not in _CACHE_CLASSEURS:
-        rep = _feuilles().get(spreadsheetId=ident,
-                              fields="properties.title,sheets.properties").execute()
+        rep = _executer(_feuilles().get(spreadsheetId=ident, fields="properties.title,sheets.properties"))
         _CACHE_CLASSEURS[ident] = {
             "id": ident, "titre": rep["properties"]["title"],
             "onglets": [s["properties"] for s in rep.get("sheets", [])]}
@@ -288,27 +308,71 @@ def _onglet_exige(classeur, nom):
     return p
 
 
+_CACHE_GRILLES = {}
+_RE_NOMBRE_TEXTE = re.compile(r"^\s*-?(0|[1-9]\d*)(\.\d+)?\s*$")
+_RE_MOIS_ANNEE = re.compile(r"^\s*\d{1,2}\.\d{4}\s*$")
+
+
+def _executer(requete):
+    """Execute une requete Google, en rejouant les refus de quota (429) et les
+    erreurs passageres (500, 503) : le compte gestion@ n'a droit qu'a
+    soixante lectures par minute, et un passage en fait bien plus."""
+    from googleapiclient.errors import HttpError
+    for tentative in range(6):
+        try:
+            return requete.execute()
+        except HttpError as exc:
+            if exc.resp.status not in (429, 500, 503) or tentative == 5:
+                raise
+            time.sleep(15 * (tentative + 1))
+
+
 def _lire_grille(ident, titre):
-    """Toute la grille d'un onglet, en valeurs typees, lignes de meme longueur."""
+    """Toute la grille d'un onglet, en valeurs typees, lignes de meme longueur.
+
+    Une seule requete par onglet, mise en cache le temps du passage : la
+    valeur effective, son affichage et la formule eventuelle arrivent
+    ensemble par includeGridData. La presence de formules est memorisee a
+    cote, pour _contient_formules."""
+    cle = (ident, titre)
+    if cle in _CACHE_GRILLES:
+        return [list(l) for l in _CACHE_GRILLES[cle]["grille"]]
     plage = "'" + titre.replace("'", "''") + "'"
-    brut = _feuilles().values().get(spreadsheetId=ident, range=plage,
-                                    valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
-    affiche = _feuilles().values().get(spreadsheetId=ident, range=plage,
-                                       valueRenderOption="FORMATTED_VALUE").execute().get("values", [])
-    largeur = max([len(l) for l in brut] + [0])
-    grille = []
-    for r, ligne in enumerate(brut):
-        aff = affiche[r] if r < len(affiche) else []
-        grille.append([_typer(ligne[c] if c < len(ligne) else "", aff[c] if c < len(aff) else "")
-                       for c in range(largeur)])
-    return grille
+    rep = _executer(_feuilles().get(
+        spreadsheetId=ident, ranges=[plage], includeGridData=True,
+        fields="sheets.data.rowData.values(effectiveValue,formattedValue,userEnteredValue.formulaValue)"))
+    donnees = (rep.get("sheets") or [{}])[0].get("data") or [{}]
+    rangees = donnees[0].get("rowData", [])
+    grille, formules = [], False
+    for r in rangees:
+        ligne = []
+        for c in r.get("values", []):
+            ev = c.get("effectiveValue") or {}
+            brut = ev.get("stringValue", ev.get("numberValue", ev.get("boolValue", "")))
+            if "errorValue" in ev:
+                brut = c.get("formattedValue", "")
+            ligne.append(_typer(brut, c.get("formattedValue", "")))
+            if "formulaValue" in (c.get("userEnteredValue") or {}):
+                formules = True
+        grille.append(ligne)
+    largeur = max([len(l) for l in grille] + [0])
+    grille = [l + [""] * (largeur - len(l)) for l in grille]
+    # les lignes vides de fin ne portent rien, comme getDataRange
+    while grille and _ligne_vide(grille[-1]):
+        grille.pop()
+    _CACHE_GRILLES[cle] = {"grille": grille, "formules": formules}
+    return [list(l) for l in grille]
 
 
 def _contient_formules(ident, titre):
-    plage = "'" + titre.replace("'", "''") + "'"
-    formules = _feuilles().values().get(spreadsheetId=ident, range=plage,
-                                        valueRenderOption="FORMULA").execute().get("values", [])
-    return any(isinstance(c, str) and c.startswith("=") for l in formules for c in l)
+    cle = (ident, titre)
+    if cle not in _CACHE_GRILLES:
+        _lire_grille(ident, titre)
+    return _CACHE_GRILLES[cle]["formules"]
+
+
+def _oublier(ident, titre):
+    _CACHE_GRILLES.pop((ident, titre), None)
 
 
 def _etendue(grille):
@@ -324,7 +388,7 @@ def _etendue(grille):
 
 def _batch(ident, requetes):
     if requetes:
-        _feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}).execute()
+        _executer(_feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}))
 
 
 def _requete_cellules(sid, r0, c0, lignes):
@@ -389,7 +453,7 @@ def _creer_onglet(classeur, titre):
 
 
 def _batch_avec_reponse(ident, requetes):
-    return _feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}).execute()
+    return _executer(_feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}))
 
 
 # ------------------------------------------------ lecture d'une table par intitules
@@ -629,6 +693,7 @@ def serialiser(tab):
     morceaux = []
     for r in tab:
         for c in r:
+            c = _coercer(c)
             if isinstance(c, Date):
                 morceaux.append("D" + str(int(round(float(c) * 86400000))))
             elif isinstance(c, bool):
@@ -668,9 +733,9 @@ def _ecrire_colonne(classeur, prop, intitule, valeurs):
         _assurer_dimensions(ident, prop, colonnes=col)
         _batch(ident, [_requete_cellules(sid, 0, col - 1, [[intitule]])])
     else:
-        f = _feuilles().values().get(spreadsheetId=ident,
-                                     range="'" + prop["title"].replace("'", "''") + "'!" + _lettre(col) + "1",
-                                     valueRenderOption="FORMULA").execute().get("values", [[""]])
+        f = _executer(_feuilles().values().get(
+            spreadsheetId=ident, range="'" + prop["title"].replace("'", "''") + "'!" + _lettre(col) + "1",
+            valueRenderOption="FORMULA")).get("values", [[""]])
         if str((f[0] if f else [""])[0] if f and f[0] else "").startswith("="):
             raise ValueError("La colonne « " + intitule + " » de l'onglet « " + prop["title"]
                              + " » est portée par une formule en ligne 1, le distributeur n'y écrit pas")
@@ -687,6 +752,7 @@ def _ecrire_colonne(classeur, prop, intitule, valeurs):
         autres = _rogner_fin([[v for i, v in enumerate(l) if i != col - 1] for l in grille])
         requetes += _requetes_tailler(prop, max(len(autres), len(nouveau) + 1), max(dc, col))
     _batch(ident, requetes)
+    _oublier(ident, prop["title"])
     return {"resultat": "OK", "lignes": len(nouveau)}
 
 
@@ -731,6 +797,7 @@ def _ecrire_long(classeur, prop, lignes5):
         autres = _rogner_fin([l[5:] for l in grille])
         requetes += _requetes_tailler(prop, max(len(nouveau) + 1, len(autres)), dc, colonnes=False)
     _batch(ident, requetes)
+    _oublier(ident, prop["title"])
     return {"resultat": "OK", "lignes": len(lignes5)}
 
 
@@ -755,6 +822,7 @@ def _ecrire_tableau(classeur, prop, entetes, lignes):
         prop.setdefault("gridProperties", {})["frozenRowCount"] = 1
     requetes += _requetes_tailler(prop, len(nouveau), largeur)
     _batch(ident, requetes)
+    _oublier(ident, prop["title"])
     return {"resultat": "OK", "lignes": len(lignes)}
 
 
@@ -772,7 +840,7 @@ def _proteger(classeur, prop):
     """Une protection d'onglet, editeurs gestion@ seul, bloquante. Rend le
     nombre d'editeurs retires. Idempotente."""
     ident, sid = classeur["id"], prop["sheetId"]
-    rep = _feuilles().get(spreadsheetId=ident, fields="sheets(properties.sheetId,protectedRanges)").execute()
+    rep = _executer(_feuilles().get(spreadsheetId=ident, fields="sheets(properties.sheetId,protectedRanges)"))
     protections = []
     for s in rep.get("sheets", []):
         if s["properties"]["sheetId"] == sid:
@@ -884,6 +952,7 @@ def _journal(entree):
     r = _journal_curseur["ligne"]
     _assurer_dimensions(ID_LISTES, prop, lignes=r + 1)
     _batch(ID_LISTES, [_requete_cellules(prop["sheetId"], r, 0, [ligne])])
+    _oublier(ID_LISTES, prop["title"])
     _journal_curseur["ligne"] = r + 1
 
 
@@ -1011,6 +1080,7 @@ def distribuer(planifie=False, lignes=None, destinataire="", intitule="", a_sec=
     debut = time.time()
     try:
         _CACHE_CLASSEURS.clear()
+        _CACHE_GRILLES.clear()
         _journal_curseur["prop"], _journal_curseur["ligne"] = None, 0
         lecture = _lire_abonnements()
         selection = [a for a in lecture["abonnements"] if a["actif"]]
@@ -1068,6 +1138,8 @@ def distribuer(planifie=False, lignes=None, destinataire="", intitule="", a_sec=
 
 
 def reproteger_tout():
+    _CACHE_CLASSEURS.clear()
+    _CACHE_GRILLES.clear()
     lecture = _lire_abonnements()
     sortie = []
     for a in lecture["abonnements"]:
