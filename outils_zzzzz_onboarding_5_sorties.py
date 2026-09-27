@@ -58,6 +58,7 @@ import outils_lieux
 from outils_zzzzz_distributeur import Date, _batch, _batch_avec_reponse, _classeur, _executer, _lire_grille, \
     _oublier, _onglet, _onglet_exige, _requete_cellules, _requete_effacer
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL, COL_SUIVI, ID_EFFECTIF, ID_GESTION, Onglet, TYPE_DOSSIER, _verrou, aujourdhui,
     cellule_vide_mut, date_de, deplacer_fichier, drive, ecrire_lignes, ecrire_objet, en_jour, fichier, lire_onglet,
     lire_onglet_de, maintenant, meme_texte, normaliser, serial_de, supprimer_lignes, texte,
@@ -811,9 +812,9 @@ try:
         premier = mots[0].lower() if mots else ""
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_archiver_sorties":
-            return tolerant(passage_archivage)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("archiver_sorties", drapeaux, tolerant(passage_archivage), dict(confirmer=("confirmer" in drapeaux)))
         if premier == "onboarding_sorties":
-            return tolerant(passage_sorties)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("sorties", drapeaux, tolerant(passage_sorties), dict(confirmer=("confirmer" in drapeaux)))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
