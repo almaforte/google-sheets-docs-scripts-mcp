@@ -49,8 +49,26 @@ des actions RH, pas des moteurs de nuit).
      en PROJET, brouillons dans rh@) restent produits par l'action RH
      « Ouvrir la sortie », que l'on peut relancer sans doublon.
 
+  4. Conditions d'application (28.09.2026, a chaque passage, pour chaque
+     sortie ouverte). La colonne « Condition d'application » de « Sortie -
+     Actions » dit de quoi depend une tache conditionnelle. Termes separes
+     par « | » (l'un suffit) ; un terme est un intitule de colonne de la
+     fiche (« Impôts source »), prefixe « registre: » pour une colonne du
+     Registre - Engagements (« registre:Encadrant »), suffixe « # » pour un
+     nombre ou un montant dont le vide vaut zero (« Carte repas (CHF/mois)#
+     »), ou « Colonne = valeur » pour une egalite ; le suffixe « [soumise] »
+     n'evalue la regle qu'une fois la page de sortie soumise (colonnes
+     remplies par le collaborateur). Lecture d'une valeur : « oui » si elle
+     porte quelque chose qui n'est pas une negation (« - », Non, Pas
+     nécessaire, 0), « non » sur une negation explicite ou un nombre vide,
+     « inconnu » sur une cellule vide. Si tous les termes disent « non », la
+     tache encore A faire passe Sans objet, datee, signee « Moteur de sortie
+     », avec la lecture dans la remarque ; une tache que le moteur avait
+     mise Sans objet et dont la condition devient « oui » est rouverte A
+     faire. Une regle « inconnue » ne touche a rien.
+
 Aucun des deux premiers moteurs ne met de courriel en file et aucun des
-trois ne produit de Google Doc : la file et l'API Docs ne sont pas
+quatre ne produit de Google Doc : la file et l'API Docs ne sont pas
 sollicitees ici.
 
 Sans confirmer, passage_archivage() et passage_sorties() lisent tout,
@@ -96,6 +114,8 @@ CLE_SORTIE = "Clé engagement"          # 10 Sortie, CLE_SORTIE_
 COL_ARCHIVE_LE = "Archivée le"
 COL_MOTIF_ARCHIVAGE = "Motif de l'archivage"
 RANG_ETAT = {"": 0, "À faire": 0, "Bloqué": 0, "En cours": 1, "Fait": 2, "Sans objet": 2}
+COL_CONDITION = "Condition d'application"     # Sortie - Actions, colonne N depuis le 28.09.2026
+NEGATIONS = {"-", "non", "no", "pas nécessaire", "pas necessaire", "0", "false", "faux", "aucun", "aucune", "néant", "neant"}
 
 
 # ------------------------------------------------ outils de valeurs
@@ -905,6 +925,97 @@ def ouvrir_les_sorties_en_attente(ctx, bilan):
             bilan["sortiesOuvertesAutomatiquement"] += 1
 
 
+# ------------------------------------------------ 4. les conditions d'application (Sortie - Actions, colonne N)
+
+def _lire_terme(terme, ligne, engagement):
+    """Un terme de condition -> (« oui », « non » ou « inconnu », lecture lisible)."""
+    t = terme.strip()
+    source, ou = ligne, "fiche"
+    if t.lower().startswith("registre:"):
+        t = t[len("registre:"):].strip()
+        source, ou = (engagement or {}), "registre"
+    numerique = t.endswith("#")
+    if numerique:
+        t = t[:-1].strip()
+    attendu = None
+    if "=" in t:
+        t, attendu = [x.strip() for x in t.split("=", 1)]
+    v = source.get(t)
+    lu = _s(v).strip()
+    lecture = t + (" (" + ou + ") = « " + lu + " »" if lu else " (" + ou + ") vide")
+    if attendu is not None:
+        return ("oui" if meme_texte(v, attendu) else "non"), lecture
+    if lu == "":
+        return ("non" if numerique else "inconnu"), lecture
+    if normaliser(v) in NEGATIONS:
+        return "non", lecture
+    if numerique:
+        n = _nombre_js(v)
+        if n == n and n == 0:
+            return "non", lecture
+    return "oui", lecture
+
+
+def evaluer_condition(regle, ligne, engagement):
+    """La colonne « Condition d'application » d'une tache -> (verdict, lecture).
+    Verdict : « oui », « non », « inconnu », ou « » quand la tache n'a pas de regle."""
+    r = _s(regle).strip()
+    if not r:
+        return "", ""
+    if "[soumise]" in r.lower():
+        r = re.sub(r"\[soumise\]", "", r, flags=re.I).strip()
+        if not _est_date(ligne.get(COL["SORTIE_SOUMISE"])):
+            return "inconnu", "page de sortie pas encore soumise"
+    verdicts, lectures = [], []
+    for terme in [x for x in r.split("|") if x.strip()]:
+        v, lecture = _lire_terme(terme, ligne, engagement)
+        verdicts.append(v)
+        lectures.append(lecture)
+    if "oui" in verdicts:
+        verdict = "oui"
+    elif verdicts and all(v == "non" for v in verdicts):
+        verdict = "non"
+    else:
+        verdict = "inconnu"
+    return verdict, " ; ".join(lectures)
+
+
+def appliquer_les_conditions(ctx, ligne, cle, initiales, engagement):
+    """Pour une sortie ouverte : les taches conditionnelles encore A faire dont
+    la condition est absente passent Sans objet ; celles que le moteur avait
+    mises Sans objet et dont la condition est presente sont rouvertes.
+    Rend { sans_objet: [ordres], rouvertes: [ordres] }."""
+    regles = {}
+    for t in ctx.actions().lignes:
+        regle = _s(t.get(COL_CONDITION)).strip()
+        if regle:
+            regles[_s(t.get(COL_SORTIE["ORDRE"])).strip()] = regle
+    bilan = {"sans_objet": [], "rouvertes": []}
+    if not regles:
+        return bilan
+    suivi = ctx.suivi()
+    for l in suivi.lignes:
+        ordre = _s(l.get(COL_SUIVI["ORDRE"])).strip()
+        if ordre not in regles or not _ligne_de_cette_sortie(l, COL_SUIVI["INITIALES"], cle, initiales):
+            continue
+        verdict, lecture = evaluer_condition(regles[ordre], ligne, engagement)
+        etat = _s(l.get(COL_SUIVI["ETAT"])).strip()
+        par_le_moteur = meme_texte(l.get(COL_SUIVI["FAIT_PAR"]), SORTIE67["FAIT_PAR"])
+        if verdict == "non" and etat in ("", "À faire"):
+            _poser_objet(ctx, suivi, l, l["_ligne"], {
+                COL_SUIVI["ETAT"]: "Sans objet",
+                COL_SUIVI["FAIT_LE"]: serial_de(maintenant()),
+                COL_SUIVI["FAIT_PAR"]: SORTIE67["FAIT_PAR"],
+                COL_SUIVI["REMARQUE"]: _ajouter_remarque(l.get(COL_SUIVI["REMARQUE"]), "Sans objet : " + lecture)})
+            bilan["sans_objet"].append(ordre)
+        elif verdict == "oui" and etat == "Sans objet" and par_le_moteur:
+            _poser_objet(ctx, suivi, l, l["_ligne"], {
+                COL_SUIVI["ETAT"]: "À faire", COL_SUIVI["FAIT_LE"]: "", COL_SUIVI["FAIT_PAR"]: "",
+                COL_SUIVI["REMARQUE"]: _ajouter_remarque(l.get(COL_SUIVI["REMARQUE"]), "Rouverte : " + lecture)})
+            bilan["rouvertes"].append(ordre)
+    return bilan
+
+
 # ------------------------------------------------ 2. passageQuotidienDesSorties (4 h 15)
 
 def passage_sorties(confirmer=False):
@@ -926,9 +1037,12 @@ def passage_sorties(confirmer=False):
             bilan["erreurs"] += 1
             ctx.dire("ouverture automatique des sorties en échec (" + str(exc)[:200] + ")")
         fin_par_cle = {}
+        engagement_par_cle = {}
         try:
             for e in ctx.engagements().lignes:
                 c = _s(e.get("Clé engagement")).strip()
+                if c:
+                    engagement_par_cle[c] = e
                 if c and _est_date(e.get("Date de fin")):
                     fin_par_cle[c] = e.get("Date de fin")
         except Exception as exc:  # noqa: BLE001
@@ -980,6 +1094,10 @@ def passage_sorties(confirmer=False):
                 if _est_date(l.get(COL["ENTRETIEN_SORTIE"])):
                     n += marquer_taches(ctx, cle, init, [550], "Fait", "Entretien de sortie fait le " + en_jour(l.get(COL["ENTRETIEN_SORTIE"])))
                     detail["constats"].append("entretien fait")
+                conditions = appliquer_les_conditions(ctx, l, cle, init, engagement_par_cle.get(cle))
+                if conditions["sans_objet"] or conditions["rouvertes"]:
+                    detail["conditions"] = conditions
+                    n += len(conditions["sans_objet"]) + len(conditions["rouvertes"])
                 detail["taches_touchees"] = n
                 bilan["tachesMisesAJour"] += n
             except Exception as exc:  # noqa: BLE001
