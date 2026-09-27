@@ -80,6 +80,7 @@ from outils_zzzzz_distributeur import (
     _lettre, _lire_grille, _onglet, _oublier,
 )
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL, COL_JOURNAL, COL_MUT, COL_MUTATIONS, ETATS_MUT, ID_EFFECTIF, ID_GESTION, PHRASE_LISIBLE, VOC,
     _formules_en_tete, _verrou, ajouter_ligne, cellule_vide_mut, date_de, ecrire, ecrire_objet, est_actif,
     lire_onglet, lire_onglet_de, maintenant, meme_texte, memoire_lire, nombre_js, nombre_ou_nul, normaliser,
@@ -1533,7 +1534,7 @@ def etat_de_la_saisie(ligne, cle, saisie, registres, mutations, regles):
             + ", ".join(c["regle"]["donnee"] or c["regle"]["colSaisie"] for c in changements))
 
 
-def controler_ecarts_de_la_saisie(ecr, regles):
+def controler_ecarts_de_la_saisie(ecr, regles, detail=None):
     saisie = lire_onglet(CFG["ONGLET_SAISIE"])
     if not saisie.existe(COL_MUT["ECART"]):
         return 0
@@ -1548,6 +1549,18 @@ def controler_ecarts_de_la_saisie(ecr, regles):
         t = etat_de_la_saisie(ligne, cle, saisie, registres, mutations, regles)
         if _s(ligne.get(COL_MUT["ECART"])) != t:
             ecr.cellule(saisie, ligne["_ligne"], COL_MUT["ECART"], t)
+        if detail is not None and meme_texte(ligne.get(COL["INITIALES"]), detail.get("initiales")):
+            # diagnostic : les ecarts regle par regle, valeurs brutes des deux cotes
+            engagement = next((l for l in registres["engagements"].lignes if _st(l.get("Clé engagement")) == cle), None)
+            personne = next((l for l in registres["personnes"].lignes
+                             if meme_texte(l.get("Initiales"), _st(ligne.get(COL["INITIALES"])).strip())), None)
+            changements = comparer_saisie_registre(regles, ligne, saisie, engagement, personne, registres) if engagement else []
+            detail["fiches"].append({"ligne": ligne["_ligne"], "cle": cle, "etat": t, "en_place": _s(ligne.get(COL_MUT["ECART"])),
+                                     "changements": [{"donnee": c["regle"]["donnee"], "format": c["regle"]["format"],
+                                                      "ancien": repr(c["ancien"]), "nouveau": repr(c["nouveau"]),
+                                                      "cle_ancien": _cle_de_comparaison(c["ancien"], c["regle"]["format"]),
+                                                      "cle_nouveau": _cle_de_comparaison(c["nouveau"], c["regle"]["format"])}
+                                                     for c in changements]})
         controlees += 1
     return controlees
 
@@ -1555,7 +1568,7 @@ def controler_ecarts_de_la_saisie(ecr, regles):
 
 # ------------------------------------------------ passage 1 : le report des mutations echues
 
-def passage_mutations(confirmer=False):
+def passage_mutations(confirmer=False, initiales=""):
     """passageQuotidienDesMutations : report des mutations echues, puis
     controle de la colonne « Écart avec le registre ». Sans confirmer, rien
     n'est ecrit et le compte rendu dit cellule par cellule ce qui le serait."""
@@ -1582,11 +1595,14 @@ def passage_mutations(confirmer=False):
                                          "cleMutation": cle_mutation_de(l), "colonnes_reportees": n})
             except Exception as err:  # noqa: BLE001
                 erreurs.append("ligne " + str(l["_ligne"]) + " : " + str(err))
-        ecarts = controler_ecarts_de_la_saisie(ecr, regles)
+        detail = {"initiales": initiales, "fiches": []} if initiales else None
+        ecarts = controler_ecarts_de_la_saisie(ecr, regles, detail)
         bilan = (str(reportees) + " mutation(s) reportée(s), " + str(ecarts) + " ligne(s) de saisie contrôlée(s)"
                  + (", erreurs : " + " | ".join(erreurs) if erreurs else ""))
         rendu = {"moteur": "mutations", "confirme": bool(confirmer), "reportees": lignes_reportees, "erreurs": erreurs,
                  "controlees": ecarts, "ecritures": ecr.ecritures, "file": [], "journal": ecr.journal}
+        if detail:
+            rendu["diagnostic"] = detail["fiches"]
         rendu["resultat" if confirmer else "resultat_prevu"] = bilan
         return rendu
     finally:
@@ -1886,9 +1902,10 @@ try:
         premier = mots[0].lower() if mots else ""
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_mutations":
-            return tolerant(passage_mutations)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("mutations", drapeaux, tolerant(passage_mutations),
+                                dict(confirmer=("confirmer" in drapeaux), initiales=options.get("initiales", "")))
         if premier == "onboarding_saisie_mutations":
-            return tolerant(passage_saisie_mutations)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("saisie_mutations", drapeaux, tolerant(passage_saisie_mutations), dict(confirmer=("confirmer" in drapeaux)))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
