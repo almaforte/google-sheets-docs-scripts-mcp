@@ -139,12 +139,11 @@ CP = {
     "JAUNE": "#fff2cc", "SAUMON": "#ffe6dd", "VIOLET": "#efebf7", "ROUGE": "#ff0000", "AMBRE": "#f9cb9c",
     "ONGLET_SAISIE": "#f7cb4d", "ONGLET_CONSULTATION": "#b4a7d6", "ONGLET_TECHNIQUE": "#999999",
     "HAUTEUR": 21, "LARGEUR_MIN": 70, "LARGEUR_MAX": 320, "PIXELS_PAR_SIGNE": 4.6, "MARGE": 16,
-    # Comme l'original (CP.EDITEURS) : gestion@ ET am.forte@. Les deux
-    # declencheurs de modification surModificationDesAffectations et
-    # surModificationDesPostes (fichiers 50, 51, 58) reconstruisent les
-    # affectations sous am.forte@ en journee, et n'ont pas d'equivalent
-    # Python : retirer am.forte@ de ces onglets les casserait.
-    "EDITEURS": ["am.forte@almaval.ch", "gestion@almaval.ch"],
+    # Depuis le 27.09.2026, gestion@ seul : les declencheurs de modification
+    # surModificationDesAffectations et surModificationDesPostes (fichiers
+    # 50, 51, 58) tournent eux aussi sous gestion@, comme la nuit. Aucun
+    # moteur n'ecrit plus ces onglets sous am.forte@.
+    "EDITEURS": ["gestion@almaval.ch"],
 }
 
 CP_COULEURS_VALEUR = {
@@ -2742,3 +2741,4 @@ try:
     _mut.PHOTO_AFFECTATIONS["fn"] = _photo_des_affectations
 except Exception as _exc:  # noqa: BLE001
     print("[onboarding postes] photo des affectations non branchée : " + type(_exc).__name__ + " " + str(_exc)[:160], flush=True)
+
