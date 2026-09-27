@@ -72,7 +72,7 @@ CFG = {
     "ETAPE_SORTIE": 5,
     "LIBELLE_INSTRUCTIONS": "Instructions de départ",
     "MODELE_CERTIFICAT": "1Payal7Ib83oyrJRlMMd6yW7jBAEmoSfvPvapYrZQbMc",
-    "CLASSEUR_PATIENTS": "1mxImnYcssgFtBSydVlQpbJZiu5S4g2w8aQtwsQMs4",
+    "CLASSEUR_PATIENTS": "1mxImnYcssgFtMBeSydVlQpbJZiu5S4g2w8aQtwsQMs4",
     "ONGLET_INDEX_PATIENTS": "Index patients",
     "DOSSIER_MODELE": "1Gpdrt5FncaDaXmURIJD-loNMFtZCEP0k",
     "DOSSIER_INTERNES": "1RUDt7moN0rPeSvssUueriYutxiMILcan",
