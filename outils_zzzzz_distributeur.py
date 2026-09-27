@@ -148,22 +148,45 @@ def _cellule_api(v):
     if isinstance(v, bool):
         return {"userEnteredValue": {"boolValue": v}}
     if isinstance(v, Date):
-        return {"userEnteredValue": {"numberValue": float(v)},
-                "userEnteredFormat": {"numberFormat": {
-                    "type": "TIME" if v.format == FORMAT_HEURE else "DATE_TIME" if v.format == FORMAT_DATE_HEURE else "DATE",
-                    "pattern": v.format}}}
+        return {"userEnteredValue": {"numberValue": float(v)}}
     if isinstance(v, (int, float)):
         return {"userEnteredValue": {"numberValue": float(v)}}
     return {"userEnteredValue": {"stringValue": str(v)}}
 
 
-def _champs_cellule(lignes):
-    """Le masque de champs : le format n'est touche que si une date est ecrite."""
-    for ligne in lignes:
-        for v in ligne:
-            if isinstance(v, Date):
-                return "userEnteredValue,userEnteredFormat.numberFormat"
-    return "userEnteredValue"
+def _requetes_format_dates(sid, r0, c0, lignes):
+    """Un repeatCell par suite verticale de dates de meme format : setValues
+    d'Apps Script ne touchait le format que des cellules qui recevaient une
+    date, et laissait les autres telles quelles. Ecrire le masque
+    numberFormat sur toute la plage effacerait le format des voisines."""
+    requetes = []
+    largeur = max([len(l) for l in lignes] + [0])
+    for c in range(largeur):
+        debut, format_courant = None, None
+        for r in range(len(lignes) + 1):
+            v = lignes[r][c] if r < len(lignes) and c < len(lignes[r]) else None
+            f = v.format if isinstance(v, Date) else None
+            if f != format_courant:
+                if format_courant is not None:
+                    requetes.append({"repeatCell": {
+                        "range": {"sheetId": sid, "startRowIndex": r0 + debut, "endRowIndex": r0 + r,
+                                  "startColumnIndex": c0 + c, "endColumnIndex": c0 + c + 1},
+                        "cell": {"userEnteredFormat": {"numberFormat": {
+                            "type": "TIME" if format_courant == FORMAT_HEURE else "DATE_TIME" if format_courant == FORMAT_DATE_HEURE else "DATE",
+                            "pattern": format_courant}}},
+                        "fields": "userEnteredFormat.numberFormat"}})
+                debut, format_courant = r, f
+    return requetes
+
+
+def _aplatir(requetes):
+    sortie = []
+    for r in requetes or []:
+        if isinstance(r, list):
+            sortie.extend(_aplatir(r))
+        elif r:
+            sortie.append(r)
+    return sortie
 
 
 # ------------------------------------------------ normalisations, grammaire
@@ -387,16 +410,19 @@ def _etendue(grille):
 
 
 def _batch(ident, requetes):
+    requetes = _aplatir(requetes)
     if requetes:
         _executer(_feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}))
 
 
 def _requete_cellules(sid, r0, c0, lignes):
-    """updateCells typee ; les lignes sont completees a la meme largeur."""
+    """updateCells typee ; les lignes sont completees a la meme largeur. Rend
+    une liste : les valeurs, puis le format de date des seules cellules qui
+    en recoivent une (voir _requetes_format_dates)."""
     largeur = max([len(l) for l in lignes] + [0])
     rows = [{"values": [_cellule_api(v) for v in (list(l) + [""] * (largeur - len(l)))]} for l in lignes]
-    return {"updateCells": {"start": {"sheetId": sid, "rowIndex": r0, "columnIndex": c0},
-                            "rows": rows, "fields": _champs_cellule(lignes)}}
+    return [{"updateCells": {"start": {"sheetId": sid, "rowIndex": r0, "columnIndex": c0},
+                             "rows": rows, "fields": "userEnteredValue"}}] + _requetes_format_dates(sid, r0, c0, lignes)
 
 
 def _requete_effacer(sid, r0, r1, c0, c1):
@@ -453,7 +479,7 @@ def _creer_onglet(classeur, titre):
 
 
 def _batch_avec_reponse(ident, requetes):
-    return _executer(_feuilles().batchUpdate(spreadsheetId=ident, body={"requests": requetes}))
+    return _executer(_feuilles().batchUpdate(spreadsheetId=ident, body={"requests": _aplatir(requetes)}))
 
 
 # ------------------------------------------------ lecture d'une table par intitules
