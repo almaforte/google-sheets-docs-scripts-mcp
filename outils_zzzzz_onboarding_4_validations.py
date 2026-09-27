@@ -68,6 +68,7 @@ from main import mcp, tolerant
 import outils_lieux
 from outils_zzzzz_distributeur import _batch, _classeur, _executer, _feuilles, _lettre, _lire_grille
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, ID_EFFECTIF, ID_GESTION, _verrou, ligne_d_en_tete, oublier_tout, texte,
 )
 
@@ -593,7 +594,7 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_validations":
-            return tolerant(lancer)(confirmer=("confirmer" in drapeaux), exemples=options.get("exemples", "0"))
+            return pont_de_fond("validations", drapeaux, tolerant(lancer), dict(confirmer=("confirmer" in drapeaux), exemples=options.get("exemples", "0")))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
