@@ -71,6 +71,7 @@ from outils_zzzzz_distributeur import (
     _onglet, _onglet_exige, _oublier, _requete_cellules, _requete_effacer, _requetes_format_dates,
 )
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, ID_GESTION, Onglet, _verrou, date_de, en_jour, ligne_d_en_tete, lire_onglet, memoire_ecrire_plusieurs,
     memoire_lire, nombre_js, normaliser, serial_de, texte,
 )
@@ -730,7 +731,7 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_recadrage":
-            return tolerant(passage)(confirmer=("confirmer" in drapeaux), apercu=options.get("apercu", "0"))
+            return pont_de_fond("recadrage", drapeaux, tolerant(passage), dict(confirmer=("confirmer" in drapeaux), apercu=options.get("apercu", "0")))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
