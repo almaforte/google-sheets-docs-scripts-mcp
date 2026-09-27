@@ -68,6 +68,7 @@ from main import mcp, tolerant
 import outils_lieux
 from outils_zzzzz_distributeur import Date
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL_MUTATIONS, ID_EFFECTIF, ID_GESTION, PRIORITE_TYPES_MUT, _verrou, cellule_vide_mut, ecrire_objet,
     est_actif, ligne_libre, lire_onglet_de, maintenant, memoire_ecrire, memoire_lire, nombre_js, nombre_ou_nul,
     nombre_ou_zero, serial_de,
@@ -683,8 +684,8 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_baserow":
-            return tolerant(passage)(confirmer=("confirmer" in drapeaux), rattrapage=("rattrapage" in drapeaux),
-                                     depuis=options.get("depuis"))
+            return pont_de_fond("baserow", drapeaux, tolerant(passage),
+                                dict(confirmer=("confirmer" in drapeaux), rattrapage=("rattrapage" in drapeaux), depuis=options.get("depuis")))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
