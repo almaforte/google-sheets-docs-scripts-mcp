@@ -34,8 +34,24 @@ des actions RH, pas des moteurs de nuit).
      sortie, hors ligne d'essai, dont les taches 465 et 590 ne sont pas
      toutes reglees.
 
-Aucun des deux moteurs ne met de courriel en file et aucun ne produit de
-Google Doc : la file et l'API Docs ne sont pas sollicitees ici.
+  3. Ouverture automatique des sorties (28.09.2026, en tete du passage de
+     4 h 15). Une ligne de « Saisie - Collaborateurs » qui porte une « Date
+     sortie », des initiales et aucun « Statut de la sortie » est ouverte
+     comme le ferait l'action RH « Ouvrir la sortie » (ouvrirSortie de
+     « 10 Sortie ») : delai de conge legal (CO 335b et 335c) ecrit dans
+     « Delai de conge legal (mois) » pour un salarie, taches du referentiel
+     « Sortie - Actions » instanciees dans « Sortie - Suivi » (jamais de
+     doublon, par cle d'engagement puis par initiales), « Statut de la
+     sortie » a En cours, « Sortie ouverte le », coordonnees de sortie
+     pre-remplies sans rien ecraser, et le compte rendu de l'ouverture
+     ecrit dans « Message du service ». La ligne d'essai (Nom = Essai) est
+     laissee a la chaine d'essai. Les complements de « 67 » (lettres de fin
+     en PROJET, brouillons dans rh@) restent produits par l'action RH
+     « Ouvrir la sortie », que l'on peut relancer sans doublon.
+
+Aucun des deux premiers moteurs ne met de courriel en file et aucun des
+trois ne produit de Google Doc : la file et l'API Docs ne sont pas
+sollicitees ici.
 
 Sans confirmer, passage_archivage() et passage_sorties() lisent tout,
 calculent tout et rendent ce qu'ils ecriraient (cellules, lignes ajoutees,
@@ -50,6 +66,7 @@ Pont : lieux_cycle avec le sujet « action:onboarding_archiver_sorties
 [confirmer] » et « action:onboarding_sorties [confirmer] ».
 """
 
+import datetime
 import re
 
 from main import mcp, tolerant
@@ -59,9 +76,10 @@ from outils_zzzzz_distributeur import Date, _batch, _batch_avec_reponse, _classe
     _oublier, _onglet, _onglet_exige, _requete_cellules, _requete_effacer
 from outils_zzzzz_onboarding_0_socle import (
     pont_de_fond,
-    CFG, CFG_MUT, COL, COL_SUIVI, ID_EFFECTIF, ID_GESTION, Onglet, TYPE_DOSSIER, _verrou, aujourdhui,
-    cellule_vide_mut, date_de, deplacer_fichier, drive, ecrire_lignes, ecrire_objet, en_jour, fichier, lire_onglet,
-    lire_onglet_de, maintenant, meme_texte, normaliser, serial_de, supprimer_lignes, texte,
+    CFG, CFG_MUT, COL, COL_SORTIE, COL_SUIVI, ID_EFFECTIF, ID_GESTION, Onglet, TYPE_DOSSIER, _verrou, aujourdhui,
+    cellule_vide_mut, date_de, deplacer_fichier, drive, ecrire_lignes, ecrire_objet, en_jour, est_actif, fichier,
+    horodatage, lire_onglet, lire_onglet_de, liste_de_texte, maintenant, meme_texte, normaliser, serial_de,
+    supprimer_lignes, texte,
 )
 
 # ------------------------------------------------ 67 Sortie, constantes
@@ -72,6 +90,7 @@ SORTIE67 = {
     "ANCIENS_PERSONNEL": "1E0ScoMAO_0t-SoTApMs33c1wwSLLE-Hb",  # 1b, 1 Anciens collaborateurs
     "DEBUT_FINALISATION": "20260926",                          # archivages anterieurs laisses tels quels
     "ETATS_OUVERTS": ["Annoncée", "En cours", "Documents remis"],
+    "OUVERTURE_AUTOMATIQUE": True,                              # 28.09.2026, en tete du passage de 4 h 15
 }
 CLE_SORTIE = "Clé engagement"          # 10 Sortie, CLE_SORTIE_
 COL_ARCHIVE_LE = "Archivée le"
@@ -228,6 +247,11 @@ class _Passage:
         if "engagements" not in self.onglets:
             self.onglets["engagements"] = lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_ENGAGEMENTS"], rafraichir=True)
         return self.onglets["engagements"]
+
+    def actions(self):
+        if "actions" not in self.onglets:
+            self.onglets["actions"] = lire_onglet(CFG["ONGLET_SORTIE_ACTIONS"], rafraichir=True)
+        return self.onglets["actions"]
 
 
 def _poser_objet(ctx, onglet, ligne, numero, objet):
@@ -664,6 +688,223 @@ def passage_archivage(confirmer=False):
     return rendu
 
 
+# ------------------------------------------------ 3. l'ouverture automatique des sorties (10 Sortie, ouvrirSortie)
+
+def _annees_de_service(debut, reference):
+    """anneesDeService_ : annees revolues entre deux datetime."""
+    if debut is None or reference is None:
+        return 0
+    annees = reference.year - debut.year
+    try:
+        anniversaire = debut.replace(year=debut.year + annees)
+    except ValueError:  # 29 fevrier
+        anniversaire = debut.replace(year=debut.year + annees, day=28)
+    if anniversaire > reference:
+        annees -= 1
+    return max(0, annees)
+
+
+def _delai_de_conge_legal(date_debut, date_reference, fin_periode_essai):
+    """delaiDeCongeLegal_ : minimum des articles 335b et 335c CO, { jours, mois, texte }."""
+    if date_debut is None:
+        return {"jours": 0, "mois": 0, "texte": "date de début manquante"}
+    reference = date_reference if date_reference is not None else maintenant()
+    if fin_periode_essai is not None and reference <= fin_periode_essai:
+        return {"jours": 7, "mois": 0, "texte": "sept jours, période d'essai"}
+    annees = _annees_de_service(date_debut, reference)
+    if annees < 1:
+        return {"jours": 0, "mois": 1, "texte": "un mois, première année de service"}
+    if annees < 9:
+        return {"jours": 0, "mois": 2, "texte": "deux mois, " + str(annees + 1) + "e année de service"}
+    return {"jours": 0, "mois": 3, "texte": "trois mois, " + str(annees + 1) + "e année de service"}
+
+
+def _fin_de_contrat_au_plus_tot(date_resiliation, delai):
+    """finDeContratAuPlusTot_ : le delai en mois court pour la fin d'un mois, le delai en jours non."""
+    if date_resiliation is None:
+        return None
+    if delai["jours"]:
+        return date_resiliation + datetime.timedelta(days=delai["jours"])
+    mois_index = date_resiliation.month - 1 + delai["mois"] + 1   # mois suivant celui de la fin
+    an = date_resiliation.year + mois_index // 12
+    mois = mois_index % 12 + 1
+    return datetime.datetime(an, mois, 1) - datetime.timedelta(days=1)
+
+
+def _mois_du_delai_contractuel(valeur):
+    """moisDuDelaiContractuel_ : un nombre de mois lu dans un libelle."""
+    if valeur is None or valeur == "":
+        return None
+    if isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
+        return float(valeur)
+    m = re.search(r"(\d+([.,]\d+)?)", str(valeur))
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
+def _concerne(filtre, valeurs):
+    """concerne_ de « 04 » : vrai si le filtre est vide, ou si l'une des valeurs y figure."""
+    attendus = liste_de_texte(filtre)
+    if not attendus:
+        return True
+    return any(any(meme_texte(a, v) for v in valeurs) for a in attendus)
+
+
+def taches_de_sortie(ctx, statut_collaboration, profession):
+    """tachesDeSortie_ : les taches actives du referentiel qui concernent ce statut et cette profession, par ordre."""
+    taches = [t for t in ctx.actions().lignes
+              if est_actif(t.get(COL_SORTIE["ACTIF"])) and _s(t.get(COL_SORTIE["ACTION"])).strip()
+              and _concerne(t.get(COL_SORTIE["STATUTS"]), [statut_collaboration])
+              and _concerne(t.get(COL_SORTIE["PROFESSIONS"]), [profession])]
+    def ordre(t):
+        n = _nombre_js(t.get(COL_SORTIE["ORDRE"]))
+        return n if n == n else 0.0
+    taches.sort(key=ordre)
+    return taches
+
+
+def _ordres_deja_suivis(suivi, initiales, cle):
+    """ordresDejaSuivis_ : les ordres deja instancies pour cet engagement, ou pour cette personne a defaut."""
+    deja = set()
+    for l in suivi.lignes:
+        if _ligne_de_cette_sortie(l, COL_SUIVI["INITIALES"], cle, initiales):
+            deja.add(_s(l.get(COL_SUIVI["ORDRE"])).strip())
+    return deja
+
+
+def _remplir_si_vide(saisie, ligne, objet, nom_colonne, valeur):
+    """remplirSiVide_ de « 05 » : la colonne existe, la source porte quelque
+    chose, la destination est vide ; sinon rien. L'ecriture est cumulee dans objet."""
+    if not saisie.existe(nom_colonne):
+        return False
+    if valeur is None or valeur == "":
+        return False
+    if not (ligne.get(nom_colonne) is None or ligne.get(nom_colonne) == ""):
+        return False
+    objet[nom_colonne] = valeur
+    return True
+
+
+def ouvrir_la_sortie(ctx, ligne):
+    """ouvrirSortie de « 10 » pour une ligne de saisie deja lue : delai legal,
+    taches instanciees sans doublon, statut En cours, date d'ouverture,
+    coordonnees pre-remplies, compte rendu dans « Message du service ».
+    Rend le detail de ce qui a ete fait ou serait fait."""
+    saisie = ctx.saisie()
+    numero = ligne["_ligne"]
+    detail = {"ligne": numero, "initiales": _s(ligne.get(COL["INITIALES"])).strip(),
+              "nom": _s(ligne.get(COL["NOM"])), "prenom": _s(ligne.get(COL["PRENOM"]))}
+    date_sortie = ligne.get(COL["DATE_SORTIE"])
+    if not _est_date(date_sortie):
+        detail["refus"] = "date de sortie absente ou illisible"
+        return detail
+    initiales = detail["initiales"]
+    if not initiales:
+        detail["refus"] = "initiales manquantes"
+        return detail
+    nom_prenom = (_s(ligne.get(COL["NOM"])) + " " + _s(ligne.get(COL["PRENOM"]))).strip()
+    detail["date_sortie"] = en_jour(date_sortie)
+
+    objet = {}
+    remarque_delai = ""
+    if meme_texte(ligne.get(COL["STATUT_COLLAB"]), "Salarié") and _est_date(ligne.get(COL["DATE_DEBUT"])):
+        reference = date_de(ligne.get(COL["RESILIATION_RECUE"])) if _est_date(ligne.get(COL["RESILIATION_RECUE"])) else maintenant()
+        fin_essai = date_de(ligne.get(COL["FIN_ESSAI"])) if _est_date(ligne.get(COL["FIN_ESSAI"])) else None
+        delai = _delai_de_conge_legal(date_de(ligne.get(COL["DATE_DEBUT"])), reference, fin_essai)
+        objet[COL["DELAI_LEGAL"]] = delai["jours"] / 30.0 if delai["jours"] else delai["mois"]
+        contractuel = _mois_du_delai_contractuel(ligne.get(COL["DELAI_CONGE"]))
+        if contractuel is not None and delai["mois"] and contractuel < delai["mois"]:
+            remarque_delai = (" ATTENTION, le délai contractuel de " + texte(contractuel)
+                              + " mois est inférieur au minimum légal de " + delai["texte"] + ", à vérifier.")
+        else:
+            remarque_delai = " Minimum légal : " + delai["texte"] + "."
+        au_plus_tot = _fin_de_contrat_au_plus_tot(reference, delai)
+        if au_plus_tot:
+            remarque_delai += " Fin possible au plus tôt le " + au_plus_tot.strftime("%d.%m.%Y") + "."
+        detail["delai_legal"] = delai
+
+    suivi = ctx.suivi()
+    cle = _cle_de_sortie(ligne)
+    deja = _ordres_deja_suivis(suivi, initiales, cle)
+    taches = taches_de_sortie(ctx, _s(ligne.get(COL["STATUT_COLLAB"])), _s(ligne.get(COL["PROFESSION"])))
+    jour_sortie = date_de(date_sortie)
+    nouvelles = []
+    for t in taches:
+        ordre = t.get(COL_SORTIE["ORDRE"])
+        if _s(ordre).strip() in deja:
+            continue
+        jours = _nombre_js(t.get(COL_SORTIE["JOURS"]))
+        if jours != jours:
+            jours = 0.0
+        echeance = jour_sortie + datetime.timedelta(days=int(jours))
+        valeurs = {CLE_SORTIE: cle, COL_SUIVI["INITIALES"]: initiales, COL_SUIVI["NOM"]: nom_prenom,
+                   COL_SUIVI["ORDRE"]: ordre, COL_SUIVI["ETAPE"]: t.get(COL_SORTIE["ETAPE"]),
+                   COL_SUIVI["ACTION"]: t.get(COL_SORTIE["ACTION"]), COL_SUIVI["RESPONSABLE"]: t.get(COL_SORTIE["RESPONSABLE"]),
+                   COL_SUIVI["ECHEANCE"]: serial_de(datetime.datetime(echeance.year, echeance.month, echeance.day)),
+                   COL_SUIVI["ETAT"]: "À faire"}
+        nouvelles.append([valeurs.get(e, "") if e else "" for e in suivi.entetes])
+    detail["taches_applicables"] = len(taches)
+    detail["taches_ajoutees"] = len(nouvelles)
+    detail["cle"] = cle
+    if nouvelles:
+        premiere = max(len(suivi.lignes) + suivi.ligne_entete + 1, suivi.ligne_entete + 1)
+        ctx.noter(suivi.titre, {"ligne": premiere, "lignes_ajoutees": len(nouvelles),
+                                "ordres": [_s(n[suivi.colonne(COL_SUIVI["ORDRE"]) - 1]) for n in nouvelles]})
+        if ctx.confirmer:
+            ecrire_lignes(suivi, premiere, 1, nouvelles)
+        for i, n in enumerate(nouvelles):
+            obj = {"_ligne": premiere + i}
+            for j, e in enumerate(suivi.entetes):
+                if e:
+                    obj[e] = n[j]
+            suivi.lignes.append(obj)
+            suivi.grille.append(list(n))
+
+    objet[COL["STATUT_SORTIE"]] = "En cours"
+    if not _est_date(ligne.get(COL["SORTIE_OUVERTE"])):
+        objet[COL["SORTIE_OUVERTE"]] = serial_de(maintenant())
+    remplies = 0
+    for source, cible in ((COL["EMAIL_PRIVE"], COL["SORTIE_EMAIL"]), ("Téléphone mobile", COL["SORTIE_TELEPHONE"]),
+                          ("Rue et numéro", COL["SORTIE_RUE"]), ("NPA", COL["SORTIE_NPA"]),
+                          ("Localité", COL["SORTIE_LOCALITE"]), ("Pays", COL["SORTIE_PAYS"]), ("IBAN", COL["SORTIE_IBAN"])):
+        if _remplir_si_vide(saisie, ligne, objet, cible, ligne.get(source)):
+            remplies += 1
+    detail["coordonnees_preremplies"] = remplies
+    message = ("Sortie ouverte automatiquement le " + horodatage() + ", " + str(len(nouvelles)) + " tâche(s) ajoutée(s) sur "
+               + str(len(taches)) + " applicable(s)." + remarque_delai
+               + " Les lettres de fin et les brouillons se produisent par l'action RH « Ouvrir la sortie », relançable sans doublon.")
+    if saisie.existe(COL["MESSAGE"]):
+        objet[COL["MESSAGE"]] = message
+    detail["message"] = message
+    _poser_objet(ctx, saisie, ligne, numero, objet)
+    return detail
+
+
+def ouvrir_les_sorties_en_attente(ctx, bilan):
+    """Les lignes de saisie qui portent une date de sortie, des initiales et
+    aucun statut de sortie, hors ligne d'essai : ouvertes une par une."""
+    rendu = ctx.rendu
+    rendu["sorties_ouvertes_automatiquement"] = []
+    if not SORTIE67["OUVERTURE_AUTOMATIQUE"]:
+        return
+    for l in ctx.saisie().lignes:
+        if not _est_date(l.get(COL["DATE_SORTIE"])):
+            continue
+        if _s(l.get(COL["STATUT_SORTIE"])).strip():
+            continue
+        if cellule_vide_mut(l.get(COL["INITIALES"])) and cellule_vide_mut(l.get(COL["NOM"])):
+            continue
+        if meme_texte(l.get(COL["NOM"]), "Essai"):
+            continue
+        try:
+            detail = ouvrir_la_sortie(ctx, l)
+        except Exception as exc:  # noqa: BLE001
+            bilan["erreurs"] += 1
+            detail = {"ligne": l["_ligne"], "initiales": _s(l.get(COL["INITIALES"])), "erreur": str(exc)[:200]}
+        rendu["sorties_ouvertes_automatiquement"].append(detail)
+        if "refus" not in detail and "erreur" not in detail:
+            bilan["sortiesOuvertesAutomatiquement"] += 1
+
+
 # ------------------------------------------------ 2. passageQuotidienDesSorties (4 h 15)
 
 def passage_sorties(confirmer=False):
@@ -671,13 +912,19 @@ def passage_sorties(confirmer=False):
     constate, puis finalise les sorties closes avant leur date."""
     ctx = _Passage("sorties", confirmer)
     rendu = ctx.rendu
-    bilan = {"sortiesOuvertes": 0, "tachesMisesAJour": 0, "archivesExaminees": 0, "finalisees": 0, "erreurs": 0}
+    bilan = {"sortiesOuvertesAutomatiquement": 0, "sortiesOuvertes": 0, "tachesMisesAJour": 0, "archivesExaminees": 0,
+             "finalisees": 0, "erreurs": 0}
     if not _verrou.acquire(timeout=30):
         rendu["resultat"] = {"fait": False, "motif": "classeur occupé"}
         return rendu
     try:
         saisie = ctx.saisie()
         erreurs_lecture = 0
+        try:
+            ouvrir_les_sorties_en_attente(ctx, bilan)
+        except Exception as exc:  # noqa: BLE001
+            bilan["erreurs"] += 1
+            ctx.dire("ouverture automatique des sorties en échec (" + str(exc)[:200] + ")")
         fin_par_cle = {}
         try:
             for e in ctx.engagements().lignes:
@@ -776,7 +1023,8 @@ def passage_sorties(confirmer=False):
         resultat = {"fait": True, "essai": False, "bilan": bilan}
         rendu["resultat" if confirmer else "resultat_prevu"] = resultat
         rendu["resultat_essai"] = {"fait": True, "essai": True,
-                                   "bilan": {"sortiesOuvertes": bilan["sortiesOuvertes"], "tachesMisesAJour": 0,
+                                   "bilan": {"sortiesOuvertesAutomatiquement": bilan["sortiesOuvertesAutomatiquement"],
+                                             "sortiesOuvertes": bilan["sortiesOuvertes"], "tachesMisesAJour": 0,
                                              "archivesExaminees": bilan["archivesExaminees"], "finalisees": 0,
                                              "erreurs": erreurs_lecture}}
         return rendu
@@ -799,7 +1047,7 @@ def onboarding_archiver_sorties(confirmer: bool = False):
 @mcp.tool()
 @tolerant
 def onboarding_sorties(confirmer: bool = False):
-    """Passage de nuit des sorties, suivi et finalisation (onboarding, 4 h 15) sous gestion@ ; simulation sans confirmer."""
+    """Passage de nuit des sorties : ouverture automatique des sorties datées, suivi et finalisation (onboarding, 4 h 15) sous gestion@ ; simulation sans confirmer."""
     return passage_sorties(confirmer=confirmer)
 
 
