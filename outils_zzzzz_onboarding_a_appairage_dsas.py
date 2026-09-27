@@ -59,6 +59,7 @@ from main import mcp, tolerant
 import outils_lieux
 import outils_zzzzz_onboarding_0_socle as socle
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, COMPTE_ROBOTS, EPOQUE, ID_EFFECTIF, ID_GESTION, TYPE_DOSSIER, _verrou, ajouter_ligne,
     copier_fichier, creer_dossier, ecrire_lignes, enfants_de, lire_onglet, maintenant, meme_texte,
     memoire_ecrire_plusieurs, memoire_lire, serial_de, texte,
@@ -1516,12 +1517,13 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_appairage":
-            return tolerant(passage_appairage)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("appairage", drapeaux, tolerant(passage_appairage), dict(confirmer=("confirmer" in drapeaux)))
         if premier == "onboarding_dsas":
-            return tolerant(passage_dsas)(confirmer=("confirmer" in drapeaux), annee=options.get("annee") or None,
-                                          trimestre=options.get("trimestre") or None, forcer=("forcer" in drapeaux),
-                                          courriels=("sanscourriels" not in drapeaux), essai=("essai" in drapeaux),
-                                          amorcer=("amorcer" in drapeaux))
+            return pont_de_fond("dsas", drapeaux, tolerant(passage_dsas),
+                                dict(confirmer=("confirmer" in drapeaux), annee=options.get("annee") or None,
+                                     trimestre=options.get("trimestre") or None, forcer=("forcer" in drapeaux),
+                                     courriels=("sanscourriels" not in drapeaux), essai=("essai" in drapeaux),
+                                     amorcer=("amorcer" in drapeaux)))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
