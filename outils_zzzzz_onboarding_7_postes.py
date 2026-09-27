@@ -68,6 +68,7 @@ from outils_zzzzz_distributeur import (
     _onglet, _oublier, _requete_cellules, _requete_effacer, _requetes_format_dates,
 )
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG_MUT, COL_MUTATIONS, ETATS_MUT, ID_EFFECTIF, ID_GESTION, VOC, _verrou, date_de, maintenant,
     nombre_js, normaliser_sans_accent, oublier_tout, serial_de, texte, voc_alias_deux_sens, voc_pole,
 )
@@ -2711,9 +2712,10 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_postes":
-            return tolerant(lancer_postes)(confirmer=("confirmer" in drapeaux), exemples=int(options.get("exemples", "50")))
+            return pont_de_fond("postes", drapeaux, tolerant(lancer_postes), dict(confirmer=("confirmer" in drapeaux), exemples=int(options.get("exemples", "50"))))
         if premier == "onboarding_charte_postes":
-            return tolerant(lancer_charte_postes)(confirmer=("confirmer" in drapeaux), exemples=int(options.get("exemples", "50")))
+            return pont_de_fond("charte_postes", drapeaux, tolerant(lancer_charte_postes),
+                                dict(confirmer=("confirmer" in drapeaux), exemples=int(options.get("exemples", "50"))))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
