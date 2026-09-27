@@ -68,6 +68,7 @@ from outils_zzzzz_distributeur import (
     _lire_grille, _onglet, _oublier, _requete_cellules, _requete_effacer,
 )
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL, ID_EFFECTIF, TYPE_DOSSIER, _verrou, appellation_nom_prenom_av, date_de, drive,
     lire_onglet, lire_onglet_de, maintenant, memoire_ecrire, memoire_lire, nom_de_fichier, normaliser,
     serial_de, texte,
@@ -899,8 +900,8 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_pieces":
-            return tolerant(lancer)(confirmer=("confirmer" in drapeaux), initiales=options.get("initiales", ""),
-                                    exemples=options.get("exemples", "50"))
+            return pont_de_fond("pieces", drapeaux, tolerant(lancer),
+                                dict(confirmer=("confirmer" in drapeaux), initiales=options.get("initiales", ""), exemples=options.get("exemples", "50")))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
