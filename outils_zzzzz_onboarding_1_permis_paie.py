@@ -48,6 +48,7 @@ from main import mcp, tolerant
 
 import outils_lieux
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL, COL_MUTATIONS, ID_EFFECTIF, _verrou, cellule_vide_mut, date_de, debut_de_jour, echapper,
     ecrire, est_actif, lire_onglet, lire_onglet_de, maintenant, meme_texte, memoire_ecrire_plusieurs,
     memoire_effacer, memoire_lire, mettre_en_file, nombre_js, nombre_ou_nul, nombre_ou_zero, normaliser,
@@ -457,10 +458,10 @@ try:
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_permis":
-            return tolerant(passage_permis)(confirmer=("confirmer" in drapeaux), amorcer=("amorcer" in drapeaux),
-                                            jours=options.get("jours", "90"))
+            return pont_de_fond("permis", drapeaux, tolerant(passage_permis),
+                                dict(confirmer=("confirmer" in drapeaux), amorcer=("amorcer" in drapeaux), jours=options.get("jours", "90")))
         if premier == "onboarding_paie":
-            return tolerant(passage_paie)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("paie", drapeaux, tolerant(passage_paie), dict(confirmer=("confirmer" in drapeaux)))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
