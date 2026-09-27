@@ -5,6 +5,16 @@ aussi a son propre compte, am.forte@almaval.ch, les robots ecrivant tous
 depuis un seul compte, gestion@almaval.ch. Puis « tu dois tout faire
 maintenant ».
 
+MISE A JOUR DU 27.09.2026. L'application web du projet « Almaval - RH -
+Onboarding des collaborateurs », qui porte la porte des vignettes (fichier
+« 60 Vignettes des villes »), est publiee et autorisee sous gestion@
+(deploiement AKfycbykxaDxXKQfEbDIfnR3JOADtSxsGB0Yq2ds95EQXQorDIxkSaaUS6inOCTYVNBBUm3i,
+adresse portee par outils_lieux_villes.APPLICATION_WEB_RH). La seule
+exception au compte unique tombe donc : la colonne des vignettes n'a plus
+besoin d'am.forte@, et la regle reposee chaque nuit ramene aussi cette
+colonne a gestion@ seul. Les protections deja posees avec l'ancienne
+description sont reconnues et renommees au passage.
+
 CE QUI CHANGE. Jusqu'ici, le moteur des lieux ecrivait sous l'identite du
 serveur qui l'appelait : am.forte@ quand la tache de nuit passait par le
 connecteur am.forte, gestion@ par le connecteur gestion. Les protections
@@ -28,15 +38,12 @@ outils_zzzz_lieux_sens_unique : il est l'enveloppe la plus exterieure.
    que tous les modules qui les ont importees par leur nom voient la
    nouvelle valeur : la charte, la cascade, les vues, le registre.
 
-3. LA SEULE EXCEPTION : LES VIGNETTES DES VILLES. Une image de cellule ne
-   se pose que par Apps Script, et la porte qui les pose (projet « Almaval -
-   RH - Onboarding des collaborateurs », fichier « 60 Vignettes des
-   villes ») s'execute sous le compte qui l'a publiee, am.forte@. Google
-   n'offre aucun moyen de l'executer sous gestion@ sans une autorisation
-   donnee a la main dans l'editeur, essai complet du 26.09.2026. Avant
-   chaque pose, la colonne visee est donc sortie de la protection de
-   l'onglet et couverte par une protection a elle, editeurs gestion@ et
-   am.forte@. Rien d'autre de l'onglet ne reste ouvert a am.forte@.
+3. LA COLONNE DES VIGNETTES. Une image de cellule ne se pose que par Apps
+   Script. Depuis le 27.09.2026 la porte qui les pose s'execute sous
+   gestion@ : avant chaque pose, la colonne visee est simplement couverte
+   par une protection a elle si elle n'en a pas, editeur gestion@, ce qui
+   ne change rien au droit d'ecriture du robot et garde la trace de
+   l'usage de la colonne.
 
 4. LA REGLE REPOSEE CHAQUE NUIT. Apres le passage quotidien, et a la
    demande par l'outil lieux_protections_compte_unique, chaque protection
@@ -59,15 +66,21 @@ import outils_lieux_villes as _villes
 from outils_lieux_socle import ID_LIEUX, _journaliser, _maintenant
 
 COMPTE_ROBOTS = "gestion@almaval.ch"
-COMPTE_PORTE_VIGNETTES = "am.forte@almaval.ch"
+# Depuis le 27.09.2026 la porte des vignettes est publiee sous gestion@ : plus
+# aucune exception au compte unique.
+COMPTE_PORTE_VIGNETTES = COMPTE_ROBOTS
+EDITEURS_VIGNETTES = [COMPTE_ROBOTS]
 SAISIE_ATTRIBUTIONS = "c.berger@almaval.ch"
 ONGLET_ATTRIBUTIONS = outils_lieux_socle.ONGLET_ATTRIBUTIONS
 ONGLET_VUE = outils_lieux_socle.ONGLET_VUE
-DESCRIPTION_VIGNETTES = "Vignettes des villes, posées par Apps Script sous am.forte@ (seule exception)"
+DESCRIPTION_VIGNETTES = "Vignettes des villes, posées par Apps Script sous gestion@ (porte du 27.09.2026)"
+DESCRIPTION_VIGNETTES_ANCIENNE = "Vignettes des villes, posées par Apps Script sous am.forte@ (seule exception)"
+DESCRIPTIONS_VIGNETTES = (DESCRIPTION_VIGNETTES, DESCRIPTION_VIGNETTES_ANCIENNE)
 DESCRIPTION_ARCHIVE = "Archive figée, écrite par le moteur, ne pas modifier"
 ONGLETS_DE_SAISIE = ("Propositions", "Propositions - CB", "Demandes", "Bureaux - Évolutions")
-DECISION = ("compte unique depuis le 26.09.2026 : le moteur des lieux écrit sous "
-            + COMPTE_ROBOTS + ", am.forte@ n'est plus éditeur que de la colonne des vignettes")
+DECISION = ("compte unique depuis le 26.09.2026, sans exception depuis le 27.09.2026 : le moteur des lieux "
+            "et la porte des vignettes écrivent sous " + COMPTE_ROBOTS
+            + ", am.forte@ n'est plus éditeur d'aucune protection")
 
 
 # ------------------------------------------------ 1. un seul compte d'ecriture
@@ -114,8 +127,11 @@ def _colonne(sid, c0):
 
 
 def _requetes_colonnes_vignettes(feuille, colonnes0):
-    """Sort les colonnes des vignettes de la protection de l'onglet et les
-    couvre d'une protection a elles, editeurs gestion@ et am.forte@."""
+    """Sort les colonnes des vignettes de la protection de l'onglet quand le
+    compte de la porte n'y est pas editeur, et les couvre d'une protection a
+    elles, editeur gestion@. Depuis le 27.09.2026 la porte tourne sous
+    gestion@, deja editeur de tout l'onglet : seule la protection de colonne
+    est encore posee, si elle manque."""
     sid = feuille["properties"]["sheetId"]
     requetes = []
     protections = feuille.get("protectedRanges", [])
@@ -149,7 +165,7 @@ def _requetes_colonnes_vignettes(feuille, colonnes0):
                 "description": DESCRIPTION_VIGNETTES,
                 "warningOnly": False,
                 "requestingUserCanEdit": True,
-                "editors": {"users": [COMPTE_ROBOTS, COMPTE_PORTE_VIGNETTES]}}}})
+                "editors": {"users": list(EDITEURS_VIGNETTES)}}}})
     return requetes
 
 
@@ -206,14 +222,15 @@ def _requetes_regle(feuilles):
             continue
         protections = feuille.get("protectedRanges", [])
         for p in protections:
-            if p.get("description") == DESCRIPTION_VIGNETTES:
-                voulus = [COMPTE_ROBOTS, COMPTE_PORTE_VIGNETTES]
-            else:
-                voulus = _editeurs_de_droit(titre)
+            description = p.get("description") or ""
+            vignettes = description in DESCRIPTIONS_VIGNETTES
+            voulus = list(EDITEURS_VIGNETTES) if vignettes else _editeurs_de_droit(titre)
+            description_voulue = DESCRIPTION_VIGNETTES if vignettes else description
             editeurs = p.get("editors", {})
             actuels = sorted(u.lower() for u in editeurs.get("users", []))
             if actuels == sorted(voulus) and not editeurs.get("groups") \
-                    and not editeurs.get("domainUsersCanEdit") and not p.get("warningOnly"):
+                    and not editeurs.get("domainUsersCanEdit") and not p.get("warningOnly") \
+                    and description == description_voulue:
                 continue
             # Les plages laissees ouvertes sont renvoyees telles quelles : une
             # mise a jour des seuls editeurs les a effacees le 26.09.2026 a
@@ -221,11 +238,12 @@ def _requetes_regle(feuilles):
             # masque de champs. Retablies aussitot.
             requetes.append({"updateProtectedRange": {
                 "protectedRange": {"protectedRangeId": p["protectedRangeId"],
+                                   "description": description_voulue,
                                    "warningOnly": False,
                                    "unprotectedRanges": list(p.get("unprotectedRanges", [])),
                                    "editors": {"users": voulus, "groups": [],
                                                "domainUsersCanEdit": False}},
-                "fields": "warningOnly,editors,unprotectedRanges"}})
+                "fields": "description,warningOnly,editors,unprotectedRanges"}})
             constats.append(titre + " : " + ", ".join(actuels or ["(aucun)"]) + " -> " + ", ".join(voulus))
         if titre.startswith("Archive") and not any(_plage_entiere(sid, p.get("range", {})) for p in protections):
             requetes.append({"addProtectedRange": {"protectedRange": {
@@ -260,10 +278,12 @@ def poser_la_regle(confirmer: bool = True):
 def lieux_protections_compte_unique(confirmer: bool = False):
     """Ramene chaque protection d'Almaval - Lieux - BDU a ses editeurs de droit.
 
-    Regle du 26.09.2026 : gestion@almaval.ch seul, plus c.berger@ sur
-    Attributions, plus am.forte@ sur la seule colonne des vignettes de la
-    Vue actuelle. Les archives sans protection en recoivent une. Les onglets
-    de saisie ne sont jamais touches. Sans confirmer, dit ce qu'il ferait.
+    Regle du 26.09.2026, sans exception depuis le 27.09.2026 :
+    gestion@almaval.ch seul, plus c.berger@ sur Attributions. La colonne des
+    vignettes de la Vue actuelle revient elle aussi a gestion@ seul, la porte
+    Apps Script qui les pose tournant sous gestion@. Les archives sans
+    protection en recoivent une. Les onglets de saisie ne sont jamais
+    touches. Sans confirmer, dit ce qu'il ferait.
     """
     return poser_la_regle(confirmer=confirmer)
 
