@@ -85,7 +85,18 @@ def norm(s):
     return re.sub(r"\s+", " ", _sans_accent(s).lower()).strip()
 
 
-_TITRES_NORM = {norm(t): n for n, t in TITRES.items()}
+_MOTS_VIDES = {"de", "des", "du", "d", "la", "le", "les", "l", "et"}
+
+
+def cle_titre(texte):
+    """Cle tolerante d'un titre : sans accent, sans mots vides, sans pluriel.
+    « Dossier de candidature », « Dossier candidatures » et « Fin de relations »
+    rejoignent ainsi les titres de la convention."""
+    mots = [m for m in re.split(r"[^a-z0-9]+", norm(texte)) if m and m not in _MOTS_VIDES]
+    return " ".join(m[:-1] if len(m) > 3 and m.endswith("s") else m for m in mots)
+
+
+_TITRES_CLES = {cle_titre(t): n for n, t in TITRES.items()}
 
 
 def _executer(requete):
@@ -115,12 +126,23 @@ def numero(nom):
 
 
 def titre_du_nom(nom):
-    """Le numero du titre porte en fin de nom (« Jeger Anne - Documents contractuels » rend 2), 0 sinon."""
-    t = norm(nom)
-    for tn, n in _TITRES_NORM.items():
-        if t == tn or t.endswith(" - " + tn) or t.endswith(" " + tn):
-            return n
-    return 0
+    """Le numero du titre porte par un nom de dossier, 0 sinon : « Jeger Anne -
+    Documents contractuels », « 4. Compétences et formations » et « 1. Dossier
+    de candidature » rendent 2, 5 et 1. Le titre est lu apres le dernier
+    « - » s'il y en a un, sinon apres le numero de tete."""
+    t = str(nom or "").strip()
+    t = re.sub(r"^\d{1,2}\s*[.)\-]?\s*", "", t)
+    if " - " in t:
+        t = t.rsplit(" - ", 1)[1]
+    return _TITRES_CLES.get(cle_titre(t), 0)
+
+
+def numero_reel(nom):
+    """Le numero que merite un dossier : celui de son titre quand il est
+    reconnu, sinon son numero de tete. Un « 4. Compétences et formations »
+    est un 5 mal numerote, pas un 4."""
+    n = titre_du_nom(nom)
+    return n if n else numero(nom)
 
 
 def nom_voulu(n, appellation):
@@ -176,10 +198,9 @@ def _enfants(drive, ident):
 def _appellation(nom_dossier, sous_dossiers):
     """L'appellation portee par un sous-dossier numerote conforme, sinon le nom du dossier avant « - »."""
     for d in sous_dossiers:
-        n = numero(d["name"])
-        if 1 <= n <= 7:
+        if numero(d["name"]):
             m = re.match(r"^\d{1,2}\s*[.)\-]?\s*(.+?)\s+-\s+(.+)$", d["name"].strip())
-            if m and norm(m.group(2)) == norm(TITRES[n]) and m.group(1).strip():
+            if m and cle_titre(m.group(2)) in _TITRES_CLES and m.group(1).strip():
                 return m.group(1).strip()
     return nom_dossier.split(" - ")[0].strip()
 
@@ -203,8 +224,8 @@ def _ranger_un_dossier(drive, fiche, confirmer):
 
     numerotes, hors = {}, []
     for d in dossiers:
-        n = numero(d["name"])
-        if 1 <= n <= 7 and n not in numerotes:
+        n = numero_reel(d["name"])
+        if 1 <= n <= 7 and n not in numerotes and numero(d["name"]) != 0:
             numerotes[n] = d
         else:
             hors.append(d)
@@ -218,7 +239,7 @@ def _ranger_un_dossier(drive, fiche, confirmer):
 
     # 1 et 2 : les dossiers hors serie qui portent un des sept titres
     for d in list(hors):
-        n = titre_du_nom(d["name"]) if numero(d["name"]) == 0 else numero(d["name"])
+        n = numero_reel(d["name"])
         if not (1 <= n <= 7):
             continue
         if n not in numerotes:
