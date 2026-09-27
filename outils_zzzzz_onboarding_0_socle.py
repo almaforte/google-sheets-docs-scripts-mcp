@@ -1210,3 +1210,56 @@ def lien_onglet(ident, nom):
     classeur = _classeur(ident)
     prop = _onglet(classeur, nom)
     return "https://docs.google.com/spreadsheets/d/" + ident + "/edit" + ("#gid=" + str(prop["sheetId"]) if prop else "")
+
+
+# ------------------------------------------------ travaux de fond
+# Un passage qui parcourt le Drive (registre des pieces) depasse les trois
+# minutes que le client MCP accorde a un appel. Le pont de chaque moteur
+# accepte alors le drapeau « fond » : le passage part dans un fil du serveur
+# et repond aussitot ; « etat » relit le resultat. Une seule execution par
+# cle a la fois, le temps du processus.
+
+_FOND = {}
+_FOND_VERROU = threading.Lock()
+
+
+def en_fond(cle, fonction, kwargs):
+    """Lance fonction(**kwargs) dans un fil ; rend l'etat courant."""
+    with _FOND_VERROU:
+        travail = _FOND.get(cle)
+        if travail and travail.get("etat") == "en cours":
+            return {"cle": cle, "etat": "en cours", "depuis": travail["depuis"], "lance": False,
+                    "message": "un passage de ce moteur est déjà en cours, relire par « etat »"}
+        travail = {"cle": cle, "etat": "en cours", "depuis": horodatage(), "fin": None, "resultat": None, "arguments": kwargs}
+        _FOND[cle] = travail
+
+    def courir():
+        try:
+            travail["resultat"] = fonction(**kwargs)
+            travail["etat"] = "terminé"
+        except Exception as exc:  # noqa: BLE001
+            travail["resultat"] = {"erreur": type(exc).__name__, "detail": str(exc)[:2000]}
+            travail["etat"] = "en erreur"
+        travail["fin"] = horodatage()
+
+    threading.Thread(target=courir, name="fond-" + str(cle), daemon=True).start()
+    return {"cle": cle, "etat": "en cours", "depuis": travail["depuis"], "lance": True,
+            "message": "passage lancé en tâche de fond, relire par le même sujet avec « etat »"}
+
+
+def etat_du_fond(cle):
+    travail = _FOND.get(cle)
+    if not travail:
+        return {"cle": cle, "etat": "inconnu", "message": "aucun passage de ce moteur lancé dans ce processus"}
+    return {"cle": cle, "etat": travail["etat"], "depuis": travail["depuis"], "fin": travail["fin"],
+            "arguments": travail["arguments"], "resultat": travail["resultat"]}
+
+
+def pont_de_fond(cle, drapeaux, fonction, kwargs):
+    """A appeler depuis le pont d'un moteur : « etat » relit, « fond » lance
+    en arriere-plan, sinon l'appel est direct."""
+    if "etat" in drapeaux:
+        return etat_du_fond(cle)
+    if "fond" in drapeaux:
+        return en_fond(cle, fonction, kwargs)
+    return fonction(**kwargs)
