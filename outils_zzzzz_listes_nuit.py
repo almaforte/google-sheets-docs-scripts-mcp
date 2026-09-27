@@ -1319,7 +1319,7 @@ def qt_calculer():
         matrice.append(o)
 
     def en_liste(dico):
-        return sorted(k + " : " + str(v) for k, v in dico.items())
+        return sorted(k + " : " + ("true" if v is True else str(v)) for k, v in dico.items())
 
     compte_rendu = {
         "unite": "Le jour. Numerateur = heures FACTURABLES, soit EPT clinique x h hebdo LAMal 100%.",
