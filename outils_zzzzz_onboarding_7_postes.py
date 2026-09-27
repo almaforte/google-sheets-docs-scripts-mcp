@@ -139,9 +139,12 @@ CP = {
     "JAUNE": "#fff2cc", "SAUMON": "#ffe6dd", "VIOLET": "#efebf7", "ROUGE": "#ff0000", "AMBRE": "#f9cb9c",
     "ONGLET_SAISIE": "#f7cb4d", "ONGLET_CONSULTATION": "#b4a7d6", "ONGLET_TECHNIQUE": "#999999",
     "HAUTEUR": 21, "LARGEUR_MIN": 70, "LARGEUR_MAX": 320, "PIXELS_PAR_SIGNE": 4.6, "MARGE": 16,
-    # Ecart assume : l'original nommait am.forte@ et gestion@ ; sous le
-    # compte unique des robots, gestion@ est le seul editeur (motif _proteger).
-    "EDITEURS": ["gestion@almaval.ch"],
+    # Comme l'original (CP.EDITEURS) : gestion@ ET am.forte@. Les deux
+    # declencheurs de modification surModificationDesAffectations et
+    # surModificationDesPostes (fichiers 50, 51, 58) reconstruisent les
+    # affectations sous am.forte@ en journee, et n'ont pas d'equivalent
+    # Python : retirer am.forte@ de ces onglets les casserait.
+    "EDITEURS": ["am.forte@almaval.ch", "gestion@almaval.ch"],
 }
 
 CP_COULEURS_VALEUR = {
