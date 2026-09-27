@@ -1900,6 +1900,7 @@ try:
         brut = str(texte_sujet or "").strip()
         mots = brut.split()
         premier = mots[0].lower() if mots else ""
+        options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_mutations":
             return pont_de_fond("mutations", drapeaux, tolerant(passage_mutations),
