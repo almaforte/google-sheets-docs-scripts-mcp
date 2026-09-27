@@ -53,6 +53,7 @@ from main import mcp, tolerant
 import outils_lieux
 from outils_zzzzz_distributeur import _batch, _executer, _feuilles, _lettre, _oublier, _requete_cellules
 from outils_zzzzz_onboarding_0_socle import (
+    pont_de_fond,
     CFG, CFG_MUT, COL, ID_EFFECTIF, ID_GESTION, _verrou, cellule_vide_mut, lire_onglet, lire_onglet_de,
     meme_texte, memoire_ecrire, memoire_lire, nombre_ou_nul, nombre_ou_zero, normaliser, texte,
 )
@@ -646,7 +647,7 @@ try:
         premier = mots[0].lower() if mots else ""
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
         if premier == "onboarding_completion":
-            return tolerant(passage)(confirmer=("confirmer" in drapeaux))
+            return pont_de_fond("completion", drapeaux, tolerant(passage), dict(confirmer=("confirmer" in drapeaux)))
         return _pont_precedent(brut)
 
     outils_lieux._pont = _pont
