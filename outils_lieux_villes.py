@@ -135,8 +135,10 @@ COLONNES_FIGEES = LARGEUR_BANDEAU + 2
 # collaborateurs », qui porte le fichier « 60 Vignettes des villes ».
 # L'adresse ne change pas quand une nouvelle version y est publiee ;
 # le deploiement de tete, lui, a deja rendu 403 le 23.09.2026.
+# Depuis le 27.09.2026 c'est le deploiement cree sous gestion@ : les
+# vignettes se posent donc sous gestion@, comme tout le reste.
 APPLICATION_WEB_RH = ("https://script.google.com/macros/s/"
-                      "AKfycbxrLXnSYB3QrsALd1walJ-tdwWpKMIAjompZUiUKY-ZjRHPaUiChLv5P3fpRGsY1V-H"
+                      "AKfycbykxaDxXKQfEbDIfnR3JOADtSxsGB0Yq2ds95EQXQorDIxkSaaUS6inOCTYVNBBUm3i"
                       "/exec")
 
 
