@@ -24,13 +24,20 @@ Ce que le passage produit, a partir de trois sources lues a chaque fois :
    ecrans de la ligne de groupe. Source « <groupe> ».
 2. L'onglet « Departements » d'Almaval - Listes : le responsable de
    chaque departement actif recoit une ligne « Responsable de
-   departement ». Source « Listes : Departements ».
+   departement ». Source « Listes : Departements ». Depuis le 28.09.2026,
+   la Fonction transversale a un responsable, le responsable des
+   operations (decision d'Alberto) : elle n'est plus sautee.
 3. L'onglet « Services - Responsables » d'Almaval - Listes : le
    responsable de chaque service actif (initiales, traduites en adresse
    par la colonne « E-mail Almaval » de Saisie - Collaborateurs) recoit
    une ligne « Responsable de service », avec le departement du service
    (colonne « Departement (gouvernance 2026) »). Source « Listes :
    Services - Responsables ».
+
+La colonne Nom porte le nom d'etat civil et le prenom d'usage, lus dans
+Registre - Personnes du classeur Almaval - Collaborateurs - Effectif
+(regle d'Alberto, rappelee le 28.09.2026 : « partout dans l'AlmaDesk ») ;
+le Nom d'une ligne miroir existante est mis a jour s'il differe.
 
 Regles :
 - une ligne est identifiee par (adresse, role, departement, service,
@@ -59,6 +66,8 @@ import outils_lieux
 
 ID_GESTION = "19RFsMg0XxgqZz101L2zAAFeGC-oyTWBNN5YnmkZvRvE"
 ID_LISTES = "116ly05SHkVj2sZXQxiFla4g8MDrRkOSQsmd-Cx3-ZVY"
+ID_EFFECTIF = "1gqCyEB8D5tJDlHQN3DPc66yQ6WfUIt1E9O1ROGiN15c"
+ONGLET_PERSONNES = "Registre - Personnes"
 ONGLET = "Portail - Droits"
 ONGLET_SAISIE = "Saisie - Collaborateurs"
 ONGLET_SERVICES = "Services - Responsables"
@@ -69,7 +78,7 @@ PREFIXE_MIROIR = "Miroir"
 PREFIXE_ANCIEN = "Membre de "
 PREFIXE_PARTI = "N'est plus"
 COMPTES_DE_SERVICE = {"rh@almaval.ch", "administration@almaval.ch", "gestion@almaval.ch", "contact@almaval.ch",
-                      "formation@almaval.ch", "comptabilite@almaval.ch", "inventaire@almaval.ch"}
+                      "formation@almaval.ch", "comptabilite@almaval.ch", "inventaire@almaval.ch", "logistique@almaval.ch"}
 ADMIN_PAR_DEFAUT = {"am.forte@almaval.ch", "gestion@almaval.ch"}
 FUSEAU = zoneinfo.ZoneInfo("Europe/Zurich")
 
@@ -203,6 +212,29 @@ def _membres_utilisateurs(groupe, profondeur=0, vus=None):
 _NOMS = {}
 
 
+def _noms_registre(table_initiales):
+    """Nom d'etat civil et prenom d'usage (regle d'Alberto, rappelee le 28.09.2026), par initiales et par adresse Almaval.
+
+    Registre - Personnes : Nom, Prenom d'usage (a defaut Prenom), E-mail ; les adresses Almaval viennent aussi
+    de Saisie - Collaborateurs (table_initiales : initiales -> adresse).
+    """
+    _, lignes = _tableau(_lire(ID_EFFECTIF, "'" + ONGLET_PERSONNES + "'!A1:AZ800"))
+    par_init, par_adresse = {}, {}
+    for l in lignes:
+        init, nom = _s(l.get("Initiales")).strip(), _s(l.get("Nom")).strip()
+        if not init or not nom:
+            continue
+        n = (nom + " " + (_s(l.get("Prénom d'usage")).strip() or _s(l.get("Prénom")).strip())).strip()
+        par_init[init] = n
+        mail = _s(l.get("E-mail")).strip().lower()
+        if mail.endswith("@almaval.ch"):
+            par_adresse[mail] = n
+    for init, mail in (table_initiales or {}).items():
+        if init in par_init and mail not in par_adresse:
+            par_adresse[mail] = par_init[init]
+    return par_init, par_adresse
+
+
 def _nom_complet(adresse):
     if adresse in _NOMS:
         return _NOMS[adresse]
@@ -273,7 +305,7 @@ def passage_droits_groupes(confirmer=False):
     # 2. Les responsables de departement.
     departements = _lire_departements()
     for d in departements:
-        if d["departement"] == "Fonction transversale" or not d["adresse"]:
+        if not d["adresse"]:  # Fonction transversale comprise depuis le 28.09.2026 : son responsable est le responsable des operations
             continue
         vouloir(d["adresse"], "Responsable de département", d["departement"], "", "", "", "Listes : " + ONGLET_DEPARTEMENTS, d["responsable"])
     rendu["sources"]["Listes : " + ONGLET_DEPARTEMENTS] = {"departements": len(departements)}
@@ -296,6 +328,17 @@ def passage_droits_groupes(confirmer=False):
     rendu["sources"]["Listes : " + ONGLET_SERVICES] = {"services": len(services), "responsables_sans_adresse": sans_adresse}
     if sans_adresse:
         rendu["avertissements"].append("Responsables sans adresse Almaval dans Saisie - Collaborateurs : " + ", ".join(sans_adresse))
+
+    # Les noms : nom d'etat civil et prenom d'usage, lus au registre.
+    try:
+        _, noms_adresse = _noms_registre(table)
+    except Exception as err:  # noqa: BLE001
+        noms_adresse = {}
+        rendu["avertissements"].append("Registre - Personnes illisible, noms laisses tels quels : " + _s(err)[:160])
+    for v in voulues.values():
+        n = noms_adresse.get(_s(v["Adresse"]).strip().lower())
+        if n:
+            v["Nom"] = n
 
     # Confrontation.
     ecritures = []  # (ligne, colonne, valeur)
@@ -329,6 +372,8 @@ def passage_droits_groupes(confirmer=False):
         for c in ("Écrans", "Groupe source"):
             if _s(existante.get(c)).strip() != v[c]:
                 changements[c] = v[c]
+        if v["Nom"] and _s(existante.get("Nom")).strip() != v["Nom"]:
+            changements["Nom"] = v["Nom"]
         if remarque.startswith(PREFIXE_PARTI) or remarque.startswith(PREFIXE_ANCIEN) or changements:
             changements["Remarque"] = PREFIXE_MIROIR + " : " + v["Groupe source"] + ", le " + quand
         if changements:
