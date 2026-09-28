@@ -69,6 +69,12 @@ Regles :
    a la main (point 1) restent lues, pour un role particulier comme
    l'Administrateur des Operations.
 
+5. Aux points 1 et 4, seuls les comptes personnels Almaval actifs recoivent
+   une ligne (_compte_personnel) : les adresses hors du domaine (superviseurs
+   externes membres d'encadrement@), les comptes suspendus et les comptes de
+   service sont ecartes, et un alias est ramene a l'adresse principale, qui
+   est celle qu'AlmaDesk voit a la connexion.
+
 Pont : lieux_cycle avec le sujet « action:portail_droits_groupes confirmer ».
 """
 
@@ -209,10 +215,59 @@ def _descendants(pole, poles_du_service):
 
 
 _DIRECTS = {}
+_ANNUAIRE = {}
+UNITES_DE_SERVICE = ("/comptes de service", "/liste contacts")
+
+
+def _annuaire(rendu=None):
+    """Comptes du domaine lus une seule fois par passage : adresse principale, alias, etat, unite."""
+    if _ANNUAIRE:
+        return _ANNUAIRE
+    principaux, alias, jeton = {}, {}, None
+    try:
+        while True:
+            rep = outils_annuaire._utilisateurs().users().list(domain="almaval.ch", maxResults=500, pageToken=jeton, projection="basic").execute()
+            for u in rep.get("users", []):
+                a = _s(u.get("primaryEmail")).strip().lower()
+                if not a:
+                    continue
+                principaux[a] = {"suspendu": bool(u.get("suspended")), "unite": _s(u.get("orgUnitPath")).strip().lower()}
+                for x in (u.get("aliases") or []) + (u.get("nonEditableAliases") or []):
+                    alias[_s(x).strip().lower()] = a
+            jeton = rep.get("nextPageToken")
+            if not jeton:
+                break
+    except Exception as err:  # noqa: BLE001
+        if rendu is not None:
+            rendu["avertissements"].append("Annuaire illisible, filtre des comptes non appliqué : " + _s(err)[:120])
+        _ANNUAIRE["ok"] = False
+        return _ANNUAIRE
+    _ANNUAIRE.update({"ok": True, "principaux": principaux, "alias": alias})
+    return _ANNUAIRE
+
+
+def _compte_personnel(adresse):
+    """L'adresse principale d'un compte Almaval personnel et actif, sinon vide.
+
+    Ecarte les adresses hors du domaine (superviseurs externes, par exemple), les comptes suspendus,
+    les comptes de service (liste COMPTES_DE_SERVICE et unites Comptes de service ou Liste contacts),
+    et ramene un alias a l'adresse principale, qui est celle que voit AlmaDesk a la connexion.
+    """
+    a = _s(adresse).strip().lower()
+    if not a or not a.endswith("@almaval.ch"):
+        return ""
+    ann = _annuaire()
+    if not ann.get("ok"):
+        return "" if a in COMPTES_DE_SERVICE else a
+    a = ann["alias"].get(a, a)
+    fiche = ann["principaux"].get(a)
+    if not fiche or fiche["suspendu"] or a in COMPTES_DE_SERVICE or fiche["unite"].startswith(UNITES_DE_SERVICE):
+        return ""
+    return a
 
 
 def _utilisateurs_directs(groupe):
-    """Les comptes membres DIRECTS d'un groupe (type USER, actifs, hors comptes de service)."""
+    """Les comptes membres DIRECTS d'un groupe (type USER, actifs), ramenes aux comptes personnels Almaval, voir _compte_personnel."""
     if groupe in _DIRECTS:
         return _DIRECTS[groupe]
     membres, jeton = [], None
@@ -227,7 +282,8 @@ def _utilisateurs_directs(groupe):
         a = _s(m.get("email")).strip().lower()
         if not a or _s(m.get("type")).upper() != "USER" or _s(m.get("status")).upper() not in ("", "ACTIVE"):
             continue
-        if a in COMPTES_DE_SERVICE or a in out:
+        a = _compte_personnel(a)
+        if not a or a in out:
             continue
         out.append(a)
     _DIRECTS[groupe] = out
@@ -324,7 +380,8 @@ def _membres_utilisateurs(groupe, profondeur=0, vus=None):
             if profondeur < 1:
                 adresses.extend(_membres_utilisateurs(a, profondeur + 1, vus))
             continue
-        if a in COMPTES_DE_SERVICE:
+        a = _compte_personnel(a)
+        if not a:
             continue
         adresses.append(a)
     resultat = []
@@ -387,6 +444,8 @@ def passage_droits_groupes(confirmer=False):
     col = {c: entetes.index(c) + 1 for c in COLONNES}
     quand = _horodatage()
     rendu = {"quand": quand, "confirmer": bool(confirmer), "sources": {}, "ajouts": [], "reactivations": [], "mises_a_jour": [], "departs": [], "inchangees": 0, "ecritures": 0, "avertissements": []}
+    _ANNUAIRE.clear()
+    _annuaire(rendu)
 
     # Les lignes en place, par cle.
     en_place = {}
