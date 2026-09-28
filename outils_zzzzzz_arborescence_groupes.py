@@ -75,6 +75,18 @@ SEPARATEUR = " > "
 # Google refuse les chevrons < et > dans le nom et la description d'un groupe (« Invalid Input: groupName »,
 # constate le 28.09.2026) : le nom affiche separe les niveaux par un guillemet simple, visuellement proche.
 SEPARATEUR_NOM = " › "
+# Google refuse aussi un nom trop long (constate le 28.09.2026 au-dela d'environ 73 signes) : le nom perd alors
+# le departement, puis le service, en gardant toujours la fin du chemin.
+LONGUEUR_NOM = 73
+
+
+def _nom_affiche(chemin):
+    segments = [str(c).replace("&", "et") for c in chemin]
+    while len(segments) > 1 and len(SEPARATEUR_NOM.join(segments)) > LONGUEUR_NOM:
+        segments = segments[1:]
+    return SEPARATEUR_NOM.join(segments)[:LONGUEUR_NOM]
+
+
 ONGLET_REGLES = "Groupes - Règles"
 ONGLET_AFFECTATIONS = "Saisie - Affectations"
 ONGLET_ENGAGEMENTS = "Effectif - Engagements"
@@ -353,7 +365,7 @@ def passage_arborescence(confirmer=False, retirer_redondances=True, alimenter=Tr
     for cle, n in ordre:
         if _fiche(n["groupe"], cache) is not None:
             continue
-        nom = SEPARATEUR_NOM.join(n["chemin"])
+        nom = _nom_affiche(n["chemin"])
         rendu["creations"].append({"adresse": n["groupe"], "nom": nom})
         if not confirmer:
             continue
@@ -439,7 +451,7 @@ def passage_arborescence(confirmer=False, retirer_redondances=True, alimenter=Tr
                             except Exception as err:  # noqa: BLE001
                                 rendu["erreurs"].append("Retrait de la redondance " + f["adresse"] + " dans " + a["adresse"] + " : " + _s(err)[:160])
                 anc = noeuds.get(anc["parent"]) if anc.get("parent") else None
-        nom = SEPARATEUR_NOM.join(n["chemin"])
+        nom = _nom_affiche(n["chemin"])
         if f["nom"] != nom:
             rendu["noms"].append({"adresse": f["adresse"], "avant": f["nom"], "apres": nom})
             if confirmer:
