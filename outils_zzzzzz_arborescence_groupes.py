@@ -211,6 +211,21 @@ def _arbre(departements, services, poles):
             noeuds[("P", service, p["pole"])] = {"niveau": "Pôle", "chemin": base["chemin"] + segments, "parent": parent,
                                                 "groupe": p["groupe"], "ligne": p["_ligne"], "table": "pol", "service": service,
                                                 "pole": p["pole"], "segment": p["segment"], "departement": base["departement"]}
+    # Un meme groupe cite par deux lignes (un service devenu pole et reste actif, deux services sur un groupe) :
+    # la citation la plus profonde l'emporte, les autres sortent de l'arbre et sont signalees, sinon le nom
+    # et l'imbrication du groupe basculeraient d'une nuit a l'autre.
+    par_groupe = {}
+    for cle, n in noeuds.items():
+        if n["groupe"]:
+            par_groupe.setdefault(n["groupe"], []).append(cle)
+    for groupe, cles in par_groupe.items():
+        if len(cles) < 2:
+            continue
+        cles.sort(key=lambda c: -len(noeuds[c]["chemin"]))
+        for c in cles[1:]:
+            anomalies.append("Groupe cité deux fois, " + SEPARATEUR.join(noeuds[c]["chemin"]) + " sort de l'arbre au profit de "
+                             + SEPARATEUR.join(noeuds[cles[0]]["chemin"]) + " (" + groupe + ") : désactiver la ligne en trop dans le référentiel")
+            noeuds.pop(c)
     return noeuds, anomalies
 
 
@@ -489,6 +504,19 @@ def renommer_adresse(groupe, adresse, confirmer=False):
 def groupe_renommer_adresse(groupe: str, adresse: str, confirmer: bool = False):
     """Change l'adresse d'un groupe ; Google garde l'ancienne en alias (courriels et partages suivent). Relit apres. Simulation sans confirmer."""
     return renommer_adresse(groupe, adresse, confirmer)
+
+
+# Le pole Inventaire a change d'adresse le 28.09.2026 (equipe.inventaire@ devenu pole.inventaire@, l'ancienne
+# gardee en alias). Google Agenda enregistre un droit de groupe sous l'adresse PRINCIPALE du groupe : le controle
+# des droits des agendas de salles (lieux_droits_agendas) doit donc comparer a la nouvelle adresse, faute de quoi
+# il reposerait chaque nuit un droit deja present.
+try:
+    import outils_lieux_socle as _socle_lieux  # noqa: E402
+    for _module in (_socle_lieux, outils_lieux):
+        if getattr(_module, "GROUPE_INVENTAIRE", "") == "equipe.inventaire@almaval.ch":
+            _module.GROUPE_INVENTAIRE = "pole.inventaire@almaval.ch"
+except Exception as _exc:  # noqa: BLE001
+    print("[arborescence groupes] adresse du pole Inventaire non reportee : " + str(_exc)[:160], flush=True)
 
 
 try:
