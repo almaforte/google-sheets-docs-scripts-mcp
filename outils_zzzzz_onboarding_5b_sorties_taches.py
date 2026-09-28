@@ -453,12 +453,14 @@ def t090_heures(sortie):
         return _poser(sortie, 90, "", "Aucun mois posé dans BDU Mois - Temps pour " + sortie.cle)
     total = (c["heures_sup"] or 0.0) + (c["rattrapage"] or 0.0)
     saisie = sortie.ctx.saisie()
-    if saisie.existe(COL["HEURES_SOLDE"]) and _s(sortie.ligne.get(COL["HEURES_SOLDE"])).strip() == "":
+    ecrit = ""
+    if total and saisie.existe(COL["HEURES_SOLDE"]) and _s(sortie.ligne.get(COL["HEURES_SOLDE"])).strip() == "":
         sorties._poser_objet(sortie.ctx, saisie, sortie.ligne, sortie.ligne["_ligne"], {COL["HEURES_SOLDE"]: round(total, 2)})
+        ecrit = " ; « " + COL["HEURES_SOLDE"] + " » = " + _fr(total) + " h écrit dans la fiche"
     return _poser(sortie, 90, "En cours", "BDU Mois - Temps, période " + c["periode"] + " : heures supplémentaires "
-                  + _fr(c["heures_sup"]) + " h, rattrapage " + _fr(c["rattrapage"]) + " h, écart de pointage cumulé "
-                  + _fr(c["ecart_pointage"]) + " h ; « " + COL["HEURES_SOLDE"] + " » = " + _fr(total) + " h ; l'arbitrage des heures négatives reste humain"
-                  + (" ; éléments de paie : " + c["elements_paie"] if c["elements_paie"] else ""))
+                  + _fr(c["heures_sup"]) + " h, rattrapage " + _fr(c["rattrapage"]) + " h, écart de pointage cumulé sur l'année "
+                  + _fr(c["ecart_pointage"]) + " h" + ecrit + " ; l'arbitrage (heures à payer, à compenser ou négatives) reste humain, à inscrire dans « "
+                  + COL["HEURES_SOLDE"] + " »" + (" ; éléments de paie : " + c["elements_paie"] if c["elements_paie"] else ""))
 
 
 def t120_dernier_salaire(sortie):
@@ -484,7 +486,8 @@ def _corps_paie(sortie, c):
         ("Salaire mensuel effectif", _chf(c["mensuel"])),
         ("Dernier salaire", _chf(c.get("dernier_salaire") or 0) + ("" if c.get("dernier_mois_complet") else ", prorata")),
         ("Prorata du treizième", _chf(c.get("treizieme") or 0) if c.get("treizieme") else "sans objet"),
-        ("Solde de vacances", (_fr(c["solde_vacances"]) + " jour(s), soit " + _chf(c["montant_vacances"]) + " à " + _chf(c["journalier"]) + " par jour") if c["solde_vacances"] is not None else "à confirmer"),
+        ("Solde de vacances", (_fr(c["solde_vacances"]) + " jour(s), soit " + _chf(abs(c["montant_vacances"])) + (" à verser" if c["montant_vacances"] >= 0 else " à retenir, vacances prises en avance")
+                               + " (" + _chf(c["journalier"]) + " par jour)") if c["solde_vacances"] is not None else "à confirmer"),
         ("Heures à solder", (_fr((c["heures_sup"] or 0) + (c["rattrapage"] or 0)) + " h") if c["heures_sup"] is not None else "à confirmer"),
         ("Éléments de paie signalés", c["elements_paie"] or "aucun"),
     ]
@@ -509,8 +512,11 @@ def t520_solde_vacances_versement(sortie):
     c = _calculs_salaire(sortie)
     if c["solde_vacances"] is None:
         return _poser(sortie, 520, "", "Solde de vacances inconnu (aucun mois posé dans la BDU)")
-    if c["solde_vacances"] <= 0:
-        return _poser(sortie, 520, "Sans objet", "Solde de vacances de " + _fr(c["solde_vacances"]) + " jour : rien à verser")
+    if c["solde_vacances"] == 0:
+        return _poser(sortie, 520, "Sans objet", "Solde de vacances nul : rien à verser")
+    if c["solde_vacances"] < 0:
+        return _poser(sortie, 520, "En cours", "Solde négatif de " + _fr(c["solde_vacances"]) + " jour(s), vacances prises en avance : retenue de "
+                      + _chf(-c["montant_vacances"]) + " (" + _chf(c["journalier"]) + " par jour) à arbitrer, inscrite dans le brouillon à la paie (tâche 510)")
     return _poser(sortie, 520, "En cours", "Montant à verser : " + _chf(c["montant_vacances"]) + " (" + _fr(c["solde_vacances"])
                   + " j x " + _chf(c["journalier"]) + "), inscrit dans le brouillon à la paie (tâche 510)")
 
@@ -602,11 +608,11 @@ def _dsas_porte_la_personne(sortie):
             grille = _lire_grille(ID_DSAS, prop["title"])
         except Exception:  # noqa: BLE001
             return None
-        noms = sorties._jetons(sortie.nom)
-        prenoms = sorties._jetons(sortie.prenom)
+        noms = [x for x in sorties._jetons(sortie.nom) if len(x) >= 3] or sorties._jetons(sortie.nom)
+        prenoms = [x for x in sorties._jetons(sortie.prenom) if len(x) >= 3] or sorties._jetons(sortie.prenom)
         for r in grille:
             texte_ligne = normaliser(" ".join(texte(v) for v in r if v not in (None, "")))
-            if noms and prenoms and all(x in texte_ligne for x in noms[:1]) and all(x in texte_ligne for x in prenoms[:1]):
+            if noms and prenoms and any(x in texte_ligne for x in noms) and any(x in texte_ligne for x in prenoms):
                 return True
         return False
     return sortie.memo("dsas_" + q, lire)
@@ -877,14 +883,15 @@ MOTEURS = {
 
 
 def _destinataires(ctx):
-    """Ordre -> destinataire de l'annonce, lu dans Sortie - Actions ; et ordre -> jours."""
-    dest, jours = {}, {}
+    """Ordre -> destinataire de l'annonce, jours par rapport a la sortie et condition d'application, lus dans Sortie - Actions."""
+    dest, jours, regles = {}, {}, {}
     for t in ctx.actions().lignes:
         o = _s(t.get(COL_SORTIE["ORDRE"])).strip()
         if o:
             dest[o] = _s(t.get(COL_DESTINATAIRE)).strip()
             jours[o] = _nombre(t.get(COL_SORTIE["JOURS"]))
-    return dest, jours
+            regles[o] = _s(t.get(sorties.COL_CONDITION)).strip()
+    return dest, jours, regles
 
 
 def executer_les_moteurs(ctx, ligne, cle, initiales, engagement):
@@ -893,7 +900,7 @@ def executer_les_moteurs(ctx, ligne, cle, initiales, engagement):
     rendu = {}
     if not sortie.date_sortie:
         return rendu
-    dest, jours = _destinataires(ctx)
+    dest, jours, regles = _destinataires(ctx)
     for ordre, (quand, moteur) in MOTEURS.items():
         t = _tache(sortie, ordre)
         if t is None:
@@ -902,6 +909,12 @@ def executer_les_moteurs(ctx, ligne, cle, initiales, engagement):
             continue
         if not sortie.moment_venu(quand, jours.get(str(ordre), 0)):
             continue
+        regle = regles.get(str(ordre), "")
+        if regle:
+            verdict, _lecture = sorties.evaluer_condition(regle, ligne, engagement)
+            if verdict != "oui":
+                rendu[str(ordre)] = {"etat": t["etat"], "touchee": False, "attente": "condition " + (verdict or "sans verdict")}
+                continue
         try:
             n = moteur(sortie, dest.get(str(ordre), ""))
             apres = _tache(sortie, ordre) or {}
