@@ -1,43 +1,50 @@
-"""Almaval - AlmaDesk Admin : les droits d'acces tenus par les groupes Google.
+"""Almaval - AlmaDesk Admin : les droits d'acces tenus par l'organigramme et les groupes Google.
 
 Raison d'etre
 
 L'onglet « Portail - Droits » du classeur Almaval - Gestion dit qui entre
-dans AlmaDesk Admin et ce qu'il voit (Adresse, Nom, Role, Service, Codes
-de responsable, Ecrans, Actif, Remarque). Tenu a la main, il se perime :
-une personne qui rejoint ou quitte les RH n'y est pas reportee. Decision
-d'Alberto du 28.09.2026 : « faut ouvrir l'acces a ces infos RH au groupe
-google equipe.rh ». L'acces se pilote donc par les groupes Google, et cet
-onglet en devient le miroir.
+dans AlmaDesk Admin et ce qu'il voit. Tenu a la main, il se perime.
+Decisions d'Alberto du 28.09.2026 : l'acces des RH se pilote par le
+groupe Google equipe.rh@ ; puis, sur la conception validee le meme jour
+(claude/almadesk-admin-conception-vues-par-organigramme-28092026.md), ce
+que chacun voit se deduit de sa place dans l'organigramme : departement,
+service, pole, et des groupes Google qui portent les services. Cet onglet
+en devient le MIROIR, tenu par ce module.
 
-Comment
+Un droit est un evenement : une ligne par personne, par role et par
+perimetre. L'application (ZAdmin 0 Droits) fait l'union des lignes
+actives d'une adresse.
 
-Une ligne de l'onglet dont l'Adresse est celle d'un GROUPE Google (par
-exemple equipe.rh@almaval.ch) est une ligne de groupe : son Role, son
-Service et ses Ecrans valent pour chacun de ses membres. Ce module lit
-les membres du groupe (utilisateurs directs et groupes imbriques, un
-niveau), et tient une ligne par membre :
+Ce que le passage produit, a partir de trois sources lues a chaque fois :
 
-1. un membre sans ligne recoit une ligne « miroir » (Role, Service,
-   Ecrans du groupe, Codes vides, Actif x, Remarque « Membre de <groupe>,
-   miroir du jj.mm.aaaa hh:mm ») ;
-2. une ligne miroir dont l'adresse n'est plus membre passe Actif « - »
-   avec la remarque « N'est plus membre de <groupe> depuis le … » ;
-3. une ligne miroir dont le membre est revenu repasse Actif x ;
-4. une ligne tenue a la main (remarque qui ne commence pas par « Membre
-   de » ni « N'est plus membre de ») n'est jamais touchee : elle prime
-   sur le groupe, c'est l'exception nommee.
+1. Les LIGNES DE GROUPE de Portail - Droits (une Adresse qui est un
+   groupe Google, Actif x) : chaque membre (utilisateurs directs et
+   groupes imbriques, un niveau, comptes de service exclus) recoit une
+   ligne miroir avec le role, le departement, le service, le pole et les
+   ecrans de la ligne de groupe. Source « <groupe> ».
+2. L'onglet « Departements » d'Almaval - Listes : le responsable de
+   chaque departement actif recoit une ligne « Responsable de
+   departement ». Source « Listes : Departements ».
+3. L'onglet « Services - Responsables » d'Almaval - Listes : le
+   responsable de chaque service actif (initiales, traduites en adresse
+   par la colonne « E-mail Almaval » de Saisie - Collaborateurs) recoit
+   une ligne « Responsable de service », avec le departement du service
+   (colonne « Departement (gouvernance 2026) »). Source « Listes :
+   Services - Responsables ».
 
-Les Codes de responsable d'une ligne miroir ne sont jamais ecrases : un
-code pose a la main y reste. Rien n'est supprime. Sans « confirmer », le
-passage simule et rend ce qu'il ecrirait.
-
-Le script Apps Script (ZAdmin 1 Sorties) continue de lire l'onglet tel
-quel : une adresse de groupe ne se connecte jamais, sa ligne est inerte
-pour lui ; ce sont les lignes miroir qui ouvrent l'ecran.
+Regles :
+- une ligne est identifiee par (adresse, role, departement, service,
+  pole) ; une ligne miroir qui n'est plus produite passe Actif « - »
+  avec la mention « N'est plus ... depuis le ... » ; une ligne miroir
+  qui redevient produite repasse « x » ;
+- une ligne tenue a la main (Remarque qui ne commence ni par « Miroir »
+  ni par « Membre de » ni par « N'est plus ») n'est jamais touchee et
+  prime sur la ligne miroir de meme cle, qui n'est alors pas ecrite ;
+- les Codes de responsable d'une ligne existante ne sont jamais ecrases ;
+- rien n'est supprime ; sans « confirmer », le passage simule et rend ce
+  qu'il ecrirait ; apres ecriture, relecture et comptage.
 
 Pont : lieux_cycle avec le sujet « action:portail_droits_groupes confirmer ».
-Passage de nuit : a enchainer dans la tache planifiee de l'onboarding.
 """
 
 import datetime
@@ -48,12 +55,19 @@ import outils_annuaire
 import outils_lieux
 
 ID_GESTION = "19RFsMg0XxgqZz101L2zAAFeGC-oyTWBNN5YnmkZvRvE"
+ID_LISTES = "116ly05SHkVj2sZXQxiFla4g8MDrRkOSQsmd-Cx3-ZVY"
 ONGLET = "Portail - Droits"
-COLONNES = ["Adresse", "Nom", "Rôle", "Service", "Codes de responsable", "Écrans", "Actif", "Remarque"]
-PREFIXE_MIROIR = "Membre de "
-PREFIXE_PARTI = "N'est plus membre de "
+ONGLET_SAISIE = "Saisie - Collaborateurs"
+ONGLET_SERVICES = "Services - Responsables"
+ONGLET_DEPARTEMENTS = "Départements"
+COLONNES = ["Adresse", "Nom", "Rôle", "Département", "Service", "Pôle", "Codes de responsable", "Écrans", "Groupe source", "Actif", "Remarque"]
+ROLES = ("Super-administrateur", "Administrateur", "Responsable de département", "Responsable de service", "Membre")
+PREFIXE_MIROIR = "Miroir"
+PREFIXE_ANCIEN = "Membre de "
+PREFIXE_PARTI = "N'est plus"
 COMPTES_DE_SERVICE = {"rh@almaval.ch", "administration@almaval.ch", "gestion@almaval.ch", "contact@almaval.ch",
                       "formation@almaval.ch", "comptabilite@almaval.ch", "inventaire@almaval.ch"}
+ADMIN_PAR_DEFAUT = {"am.forte@almaval.ch", "gestion@almaval.ch"}
 FUSEAU = zoneinfo.ZoneInfo("Europe/Zurich")
 
 
@@ -70,25 +84,78 @@ def _horodatage():
     return datetime.datetime.now(FUSEAU).strftime("%d.%m.%Y %H:%M")
 
 
-def _lire_onglet():
-    """Les lignes de l'onglet, cle par intitule, avec leur numero de ligne."""
-    lu = _appeler(main.get_values, spreadsheet_id=ID_GESTION, range_a1="'" + ONGLET + "'!A1:H400")
+def _lettre(index_1):
+    return main._col_letter(index_1)
+
+
+def _lire(spreadsheet_id, plage):
+    lu = _appeler(main.get_values, spreadsheet_id=spreadsheet_id, range_a1=plage)
     if isinstance(lu, dict) and lu.get("erreur"):
-        raise ValueError("lecture de l'onglet refusee : " + _s(lu.get("detail")))
-    valeurs = lu.get("valeurs", [])
-    if not valeurs:
-        raise ValueError("onglet vide ou introuvable : " + ONGLET)
-    entetes = [_s(e).strip() for e in valeurs[0]]
-    manquantes = [c for c in COLONNES if c not in entetes]
-    if manquantes:
-        raise ValueError("colonnes manquantes dans " + ONGLET + " : " + ", ".join(manquantes))
+        raise ValueError("lecture refusee (" + plage + ") : " + _s(lu.get("detail")))
+    return lu.get("valeurs", []) if isinstance(lu, dict) else []
+
+
+def _tableau(valeurs, ligne_entete=1):
+    """Lignes cle par intitule, avec _ligne (numero dans l'onglet)."""
+    if len(valeurs) < ligne_entete:
+        return [], []
+    entetes = [_s(e).strip() for e in valeurs[ligne_entete - 1]]
     lignes = []
-    for i, brut in enumerate(valeurs[1:], start=2):
+    for i, brut in enumerate(valeurs[ligne_entete:], start=ligne_entete + 1):
         rangee = list(brut) + [""] * (len(entetes) - len(brut))
         obj = {e: rangee[j] for j, e in enumerate(entetes) if e}
         obj["_ligne"] = i
         lignes.append(obj)
     return entetes, lignes
+
+
+def _actif(v):
+    return _s(v).strip().lower() == "x"
+
+
+def _lire_droits():
+    entetes, lignes = _tableau(_lire(ID_GESTION, "'" + ONGLET + "'!A1:L400"))
+    manquantes = [c for c in COLONNES if c not in entetes]
+    if manquantes:
+        raise ValueError("Portail - Droits n'est pas en version 2 (colonnes manquantes : " + ", ".join(manquantes) + ") : lancer d'abord adminPreparerDroits")
+    return entetes, lignes
+
+
+def _lire_departements():
+    _, lignes = _tableau(_lire(ID_LISTES, "'" + ONGLET_DEPARTEMENTS + "'!A1:G30"))
+    return [{"departement": _s(l.get("Département")).strip(), "responsable": _s(l.get("Responsable")).strip(),
+             "initiales": _s(l.get("Initiales")).strip(), "adresse": _s(l.get("Adresse")).strip().lower()}
+            for l in lignes if _s(l.get("Département")).strip() and _actif(l.get("Actif"))]
+
+
+def _lire_services():
+    _, lignes = _tableau(_lire(ID_LISTES, "'" + ONGLET_SERVICES + "'!A1:L80"))
+    out = []
+    for l in lignes:
+        nom = _s(l.get("Service")).strip()
+        if not nom or not _actif(l.get("Actif")):
+            continue
+        out.append({"service": nom, "responsable": _s(l.get("Responsable")).strip(), "initiales": _s(l.get("Initiales")).strip(),
+                    "departement": _s(l.get("Département (gouvernance 2026)") or l.get("Département")).strip()})
+    return out
+
+
+def _adresses_par_initiales():
+    """Initiales -> adresse Almaval, lues dans Saisie - Collaborateurs (intitules en ligne 3)."""
+    tetes = _lire(ID_GESTION, "'" + ONGLET_SAISIE + "'!A3:HZ3")
+    entetes = [_s(e).strip() for e in (tetes[0] if tetes else [])]
+    if "Initiales" not in entetes or "E-mail Almaval" not in entetes:
+        raise ValueError("Saisie - Collaborateurs : colonnes Initiales ou E-mail Almaval introuvables en ligne 3")
+    ci, ce = entetes.index("Initiales") + 1, entetes.index("E-mail Almaval") + 1
+    init = _lire(ID_GESTION, "'" + ONGLET_SAISIE + "'!" + _lettre(ci) + "4:" + _lettre(ci) + "400")
+    mails = _lire(ID_GESTION, "'" + ONGLET_SAISIE + "'!" + _lettre(ce) + "4:" + _lettre(ce) + "400")
+    table = {}
+    for k in range(max(len(init), len(mails))):
+        i = _s(init[k][0]).strip() if k < len(init) and init[k] else ""
+        m = _s(mails[k][0]).strip().lower() if k < len(mails) and mails[k] else ""
+        if i and m and "@" in m and i not in table:
+            table[i] = m
+    return table
 
 
 def _est_groupe(adresse):
@@ -100,7 +167,6 @@ def _est_groupe(adresse):
 
 
 def _membres_utilisateurs(groupe, profondeur=0, vus=None):
-    """Les adresses des membres utilisateurs actifs, groupes imbriques compris (un niveau)."""
     vus = vus if vus is not None else set()
     if groupe in vus:
         return []
@@ -131,93 +197,153 @@ def _membres_utilisateurs(groupe, profondeur=0, vus=None):
     return resultat
 
 
+_NOMS = {}
+
+
 def _nom_complet(adresse):
+    if adresse in _NOMS:
+        return _NOMS[adresse]
+    nom = adresse.split("@")[0]
     try:
         u = outils_annuaire._utilisateurs().users().get(userKey=adresse).execute()
-        return _s((u.get("name") or {}).get("fullName")).strip() or adresse.split("@")[0]
+        nom = _s((u.get("name") or {}).get("fullName")).strip() or nom
     except Exception:  # noqa: BLE001
-        return adresse.split("@")[0]
+        pass
+    _NOMS[adresse] = nom
+    return nom
 
 
-def _lettre(index_1):
-    return main._col_letter(index_1)
+def _cle(adresse, role, departement, service, pole):
+    return "|".join([_s(adresse).strip().lower(), _s(role).strip(), _s(departement).strip(), _s(service).strip(), _s(pole).strip()])
+
+
+def _est_miroir(remarque):
+    r = _s(remarque).strip()
+    return r.startswith(PREFIXE_MIROIR) or r.startswith(PREFIXE_ANCIEN) or r.startswith(PREFIXE_PARTI)
 
 
 def passage_droits_groupes(confirmer=False):
-    entetes, lignes = _lire_onglet()
+    entetes, lignes = _lire_droits()
     col = {c: entetes.index(c) + 1 for c in COLONNES}
     quand = _horodatage()
-    par_adresse = {}
+    rendu = {"quand": quand, "confirmer": bool(confirmer), "sources": {}, "ajouts": [], "reactivations": [], "mises_a_jour": [], "departs": [], "inchangees": 0, "ecritures": 0, "avertissements": []}
+
+    # Les lignes en place, par cle.
+    en_place = {}
     for l in lignes:
-        a = _s(l["Adresse"]).strip().lower()
-        if a:
-            par_adresse.setdefault(a, l)
-    groupes = [l for l in lignes if _s(l["Adresse"]).strip() and _s(l["Actif"]).strip().lower() == "x" and _est_groupe(_s(l["Adresse"]).strip().lower())]
-    rendu = {"quand": quand, "confirmer": bool(confirmer), "groupes": [], "ajouts": [], "reactivations": [], "departs": [], "mises_a_jour": [], "inchangees": 0, "ecritures": 0}
+        a = _s(l.get("Adresse")).strip().lower()
+        if not a:
+            continue
+        en_place.setdefault(_cle(a, l.get("Rôle"), l.get("Département"), l.get("Service"), l.get("Pôle")), l)
+
+    # Ce que le passage veut voir en place : {cle: {colonnes...}}.
+    voulues = {}
+
+    def vouloir(adresse, role, departement, service, pole, ecrans, source, nom=""):
+        k = _cle(adresse, role, departement, service, pole)
+        if k in voulues:
+            return
+        voulues[k] = {"Adresse": adresse, "Nom": nom, "Rôle": role, "Département": _s(departement).strip(), "Service": _s(service).strip(), "Pôle": _s(pole).strip(),
+                      "Écrans": _s(ecrans).strip(), "Groupe source": source}
+
+    # 1. Les lignes de groupe.
+    groupes = []
+    for l in lignes:
+        a = _s(l.get("Adresse")).strip().lower()
+        if not a or not _actif(l.get("Actif")) or a in ADMIN_PAR_DEFAUT or "@" not in a:
+            continue
+        if not _est_groupe(a):
+            continue
+        groupes.append(l)
+    for g in groupes:
+        adresse_groupe = _s(g.get("Adresse")).strip().lower()
+        membres = _membres_utilisateurs(adresse_groupe)
+        role = _s(g.get("Rôle")).strip() or "Membre"
+        if role not in ROLES or role == "Super-administrateur":
+            role = "Membre"
+        rendu["sources"][adresse_groupe] = {"membres": len(membres), "role": role, "departement": _s(g.get("Département")), "service": _s(g.get("Service")), "pole": _s(g.get("Pôle"))}
+        for a in membres:
+            vouloir(a, role, g.get("Département"), g.get("Service"), g.get("Pôle"), g.get("Écrans"), adresse_groupe)
+
+    # 2. Les responsables de departement.
+    departements = _lire_departements()
+    for d in departements:
+        if d["departement"] == "Fonction transversale" or not d["adresse"]:
+            continue
+        vouloir(d["adresse"], "Responsable de département", d["departement"], "", "", "", "Listes : " + ONGLET_DEPARTEMENTS, d["responsable"])
+    rendu["sources"]["Listes : " + ONGLET_DEPARTEMENTS] = {"departements": len(departements)}
+
+    # 3. Les responsables de service.
+    services = _lire_services()
+    table = _adresses_par_initiales()
+    sans_adresse = []
+    for sv in services:
+        if not sv["initiales"]:
+            continue
+        a = table.get(sv["initiales"], "")
+        if not a:
+            sans_adresse.append(sv["service"] + " (" + sv["initiales"] + ")")
+            continue
+        vouloir(a, "Responsable de service", sv["departement"], sv["service"], "", "", "Listes : " + ONGLET_SERVICES, sv["responsable"])
+    rendu["sources"]["Listes : " + ONGLET_SERVICES] = {"services": len(services), "responsables_sans_adresse": sans_adresse}
+    if sans_adresse:
+        rendu["avertissements"].append("Responsables sans adresse Almaval dans Saisie - Collaborateurs : " + ", ".join(sans_adresse))
+
+    # Confrontation.
     ecritures = []  # (ligne, colonne, valeur)
     ajouts = []
-    membres_par_groupe = {}
-    for g in groupes:
-        adresse_groupe = _s(g["Adresse"]).strip().lower()
-        membres = _membres_utilisateurs(adresse_groupe)
-        membres_par_groupe[adresse_groupe] = membres
-        rendu["groupes"].append({"groupe": adresse_groupe, "role": _s(g["Rôle"]), "service": _s(g["Service"]), "ecrans": _s(g["Écrans"]), "membres": len(membres)})
-        for a in membres:
-            existante = par_adresse.get(a)
-            if not existante:
-                nom = _nom_complet(a)
-                rangee = ["" for _ in entetes]
-                rangee[col["Adresse"] - 1] = a
-                rangee[col["Nom"] - 1] = nom
-                rangee[col["Rôle"] - 1] = _s(g["Rôle"])
-                rangee[col["Service"] - 1] = _s(g["Service"])
-                rangee[col["Codes de responsable"] - 1] = ""
-                rangee[col["Écrans"] - 1] = _s(g["Écrans"])
-                rangee[col["Actif"] - 1] = "x"
-                rangee[col["Remarque"] - 1] = PREFIXE_MIROIR + adresse_groupe + ", miroir du " + quand
-                ajouts.append(rangee)
-                rendu["ajouts"].append({"adresse": a, "nom": nom, "groupe": adresse_groupe})
-                par_adresse[a] = {"_ligne": None, "Adresse": a, "Remarque": rangee[col["Remarque"] - 1], "Actif": "x"}
-                continue
-            remarque = _s(existante.get("Remarque")).strip()
-            if not (remarque.startswith(PREFIXE_MIROIR) or remarque.startswith(PREFIXE_PARTI)):
-                rendu["inchangees"] += 1  # ligne tenue a la main : elle prime
-                continue
-            if existante["_ligne"] is None:
-                continue  # ajoutee dans ce passage par un autre groupe
-            changements = {}
-            if _s(existante.get("Actif")).strip().lower() != "x":
-                changements["Actif"] = "x"
-            for c in ("Rôle", "Service", "Écrans"):
-                if _s(existante.get(c)).strip() != _s(g[c]).strip():
-                    changements[c] = _s(g[c])
-            nouvelle_remarque = PREFIXE_MIROIR + adresse_groupe + ", miroir du " + quand
-            if remarque.startswith(PREFIXE_PARTI) or changements:
-                changements["Remarque"] = nouvelle_remarque
-            if changements:
-                for c, v in changements.items():
-                    ecritures.append((existante["_ligne"], col[c], v))
-                (rendu["reactivations"] if remarque.startswith(PREFIXE_PARTI) else rendu["mises_a_jour"]).append({"adresse": a, "ligne": existante["_ligne"], "changements": changements})
-            else:
-                rendu["inchangees"] += 1
-    # Les lignes miroir dont le membre est parti.
-    tous_membres = set()
-    for m in membres_par_groupe.values():
-        tous_membres.update(m)
-    for l in lignes:
-        a = _s(l["Adresse"]).strip().lower()
+    for k, v in voulues.items():
+        existante = en_place.get(k)
+        if existante is None:
+            nom = v["Nom"] or _nom_complet(v["Adresse"])
+            rangee = ["" for _ in entetes]
+            rangee[col["Adresse"] - 1] = v["Adresse"]
+            rangee[col["Nom"] - 1] = nom
+            rangee[col["Rôle"] - 1] = v["Rôle"]
+            rangee[col["Département"] - 1] = v["Département"]
+            rangee[col["Service"] - 1] = v["Service"]
+            rangee[col["Pôle"] - 1] = v["Pôle"]
+            rangee[col["Codes de responsable"] - 1] = ""
+            rangee[col["Écrans"] - 1] = v["Écrans"]
+            rangee[col["Groupe source"] - 1] = v["Groupe source"]
+            rangee[col["Actif"] - 1] = "x"
+            rangee[col["Remarque"] - 1] = PREFIXE_MIROIR + " : " + v["Groupe source"] + ", le " + quand
+            ajouts.append(rangee)
+            rendu["ajouts"].append({"adresse": v["Adresse"], "role": v["Rôle"], "departement": v["Département"], "service": v["Service"], "source": v["Groupe source"]})
+            continue
+        remarque = _s(existante.get("Remarque")).strip()
+        if not _est_miroir(remarque):
+            rendu["inchangees"] += 1  # tenue a la main : elle prime
+            continue
+        changements = {}
+        if not _actif(existante.get("Actif")):
+            changements["Actif"] = "x"
+        for c in ("Écrans", "Groupe source"):
+            if _s(existante.get(c)).strip() != v[c]:
+                changements[c] = v[c]
+        if remarque.startswith(PREFIXE_PARTI) or remarque.startswith(PREFIXE_ANCIEN) or changements:
+            changements["Remarque"] = PREFIXE_MIROIR + " : " + v["Groupe source"] + ", le " + quand
+        if changements:
+            for c, val in changements.items():
+                ecritures.append((existante["_ligne"], col[c], val))
+            (rendu["reactivations"] if remarque.startswith(PREFIXE_PARTI) else rendu["mises_a_jour"]).append({"adresse": v["Adresse"], "ligne": existante["_ligne"], "changements": changements})
+        else:
+            rendu["inchangees"] += 1
+
+    # Les lignes miroir qui ne sont plus produites.
+    for k, l in en_place.items():
         remarque = _s(l.get("Remarque")).strip()
-        if not a or not remarque.startswith(PREFIXE_MIROIR):
+        if k in voulues or not _est_miroir(remarque) or remarque.startswith(PREFIXE_PARTI):
             continue
-        if a in tous_membres:
+        a = _s(l.get("Adresse")).strip().lower()
+        if a in ADMIN_PAR_DEFAUT:
             continue
-        groupe_source = remarque[len(PREFIXE_MIROIR):].split(",")[0].strip()
-        if groupe_source and groupe_source not in membres_par_groupe:
-            continue  # le groupe n'est plus suivi ici : on ne decide rien
-        if _s(l.get("Actif")).strip() != "-":
+        source = _s(l.get("Groupe source")).strip() or remarque
+        if _actif(l.get("Actif")):
             ecritures.append((l["_ligne"], col["Actif"], "-"))
-        ecritures.append((l["_ligne"], col["Remarque"], PREFIXE_PARTI + groupe_source + " depuis le " + quand + ", miroir"))
-        rendu["departs"].append({"adresse": a, "ligne": l["_ligne"], "groupe": groupe_source})
+        ecritures.append((l["_ligne"], col["Remarque"], PREFIXE_PARTI + " produit par " + source + " depuis le " + quand + ", miroir"))
+        rendu["departs"].append({"adresse": a, "ligne": l["_ligne"], "role": _s(l.get("Rôle")), "service": _s(l.get("Service")), "source": source})
+
     rendu["ecritures"] = len(ecritures) + len(ajouts)
     if not confirmer:
         rendu["simulation"] = True
@@ -227,23 +353,27 @@ def passage_droits_groupes(confirmer=False):
         if isinstance(rep, dict) and rep.get("erreur"):
             raise ValueError("ecriture refusee en " + _lettre(colonne) + str(ligne) + " : " + _s(rep.get("detail")))
     if ajouts:
-        rep = _appeler(main.append_rows, spreadsheet_id=ID_GESTION, range_a1="'" + ONGLET + "'!A1:H", values=ajouts)
+        rep = _appeler(main.append_rows, spreadsheet_id=ID_GESTION, range_a1="'" + ONGLET + "'!A1:" + _lettre(len(entetes)), values=ajouts)
         if isinstance(rep, dict) and rep.get("erreur"):
             raise ValueError("ajout refuse : " + _s(rep.get("detail")))
         rendu["plage_ajoutee"] = rep.get("updatedRange") if isinstance(rep, dict) else None
-    # Relecture apres ecriture : chaque membre attendu a une ligne active.
-    _, relu = _lire_onglet()
-    presents = {_s(l["Adresse"]).strip().lower(): l for l in relu if _s(l["Adresse"]).strip()}
-    manquants = [a for a in tous_membres if a not in presents or _s(presents[a].get("Actif")).strip().lower() != "x"]
-    rendu["relecture"] = {"lignes": len(relu), "membres_attendus": len(tous_membres), "manquants_ou_inactifs": manquants}
-    rendu["ok"] = not manquants
+    # Relecture : chaque ligne voulue est en place et active.
+    _, relu = _lire_droits()
+    presentes = {}
+    for l in relu:
+        a = _s(l.get("Adresse")).strip().lower()
+        if a:
+            presentes.setdefault(_cle(a, l.get("Rôle"), l.get("Département"), l.get("Service"), l.get("Pôle")), l)
+    manquantes = [k for k in voulues if k not in presentes or not _actif(presentes[k].get("Actif"))]
+    rendu["relecture"] = {"lignes": len(relu), "voulues": len(voulues), "manquantes_ou_inactives": manquantes}
+    rendu["ok"] = not manquantes
     return rendu
 
 
 @main.mcp.tool()
 @main.tolerant
 def portail_droits_groupes(confirmer: bool = False):
-    """Miroir des groupes Google dans Portail - Droits (AlmaDesk Admin) : une ligne par membre des groupes cites dans l'onglet ; simulation sans confirmer."""
+    """Miroir de l'organigramme et des groupes Google dans Portail - Droits (AlmaDesk Admin) : une ligne par membre des groupes cites, par responsable de departement et par responsable de service ; simulation sans confirmer."""
     return passage_droits_groupes(confirmer=confirmer)
 
 
