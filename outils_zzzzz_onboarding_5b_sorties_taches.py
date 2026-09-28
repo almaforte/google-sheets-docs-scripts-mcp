@@ -504,7 +504,7 @@ def t510_decompte_paie(sortie, destinataire):
     r = _deposer_brouillon(sortie, 510, destinataire or CFG["EMAIL_PAIE"],
                            "Sortie de " + sortie.nom_prenom + " au " + _jour_texte(sortie.date_sortie) + " : dernier décompte de salaire",
                            _corps_paie(sortie, c))
-    return _poser(sortie, 510, "En cours", "Brouillon à la paie " + ("déjà " if r["existant"] else "") + "déposé dans la file des courriels"
+    return _poser(sortie, 510, "En cours", "Brouillon à la paie déposé dans la file des courriels"
                   + (" (ligne " + str(r["ligne"]) + ")" if r["ligne"] else "") + ", posé dans rh@ par le robot des courriels ; relire, joindre, envoyer, puis Fait")
 
 
@@ -556,7 +556,7 @@ def _annonce(sortie, ordre, destinataire, organisme, objet_court, phrase, avec_s
              + _fiche_annonce(sortie, avec_salaire) + (("<p>" + complement + "</p>") if complement else "")
              + "<p>Nous restons à disposition pour toute pièce complémentaire.</p>")
     r = _deposer_brouillon(sortie, ordre, destinataire, objet_court + " : " + sortie.nom_prenom + ", sortie au " + _jour_texte(sortie.date_sortie), corps)
-    return _poser(sortie, ordre, "En cours", "Brouillon " + organisme + (" déjà" if r["existant"] else "") + " déposé dans la file des courriels"
+    return _poser(sortie, ordre, "En cours", "Brouillon " + organisme + " déposé dans la file des courriels"
                   + (" (ligne " + str(r["ligne"]) + ")" if r["ligne"] else "")
                   + (", destinataire " + destinataire if destinataire else ", destinataire à compléter dans Sortie - Actions")
                   + " ; relire, compléter le formulaire de l'organisme, envoyer, puis Fait")
@@ -779,7 +779,7 @@ def t280_attestation_lpp(sortie, dest):
                            "<p>Bonjour,</p><p>Nous vous remercions de nous transmettre l'attestation de sortie LPP et le décompte de libre passage de "
                            + _echapper(sortie.nom_prenom) + ", sorti(e) de nos effectifs le " + _jour_texte(sortie.date_sortie) + ".</p>" + _fiche_annonce(sortie))
     return _poser(sortie, 280, "En cours", "Aucune attestation LPP dans le sous-dossier 7 trente jours après la sortie ; brouillon de relance à Medpension "
-                  + ("déjà " if r["existant"] else "") + "déposé dans la file" + (" (ligne " + str(r["ligne"]) + ")" if r["ligne"] else ""))
+                  + "déposé dans la file" + (" (ligne " + str(r["ligne"]) + ")" if r["ligne"] else ""))
 
 
 # ------------------------------------------------ famille 6 : acces et materiel
