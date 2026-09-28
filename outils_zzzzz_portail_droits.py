@@ -54,6 +54,21 @@ Regles :
 - rien n'est supprime ; sans « confirmer », le passage simule et rend ce
   qu'il ecrirait ; apres ecriture, relecture et comptage.
 
+4. Depuis le 28.09.2026 au soir (decision d'Alberto : « brancher les droits
+   sur les groupes Google »), L'ARBRE DES REFERENTIELS : chaque service
+   actif de « Services - Responsables » qui porte un Groupe Google, et
+   chaque pole actif de « Services - Poles » qui en porte un. Un membre
+   direct du groupe d'un pole est membre de ce pole, de tous les poles
+   dont il descend (libelle « Locaux > Intendance » sous « Locaux ») et du
+   service ; un membre direct du groupe du service est membre du service.
+   Seuls les groupes DECLARES dans l'arbre donnent un droit : un groupe
+   imbrique pour la diffusion (equipe.operations@ dans les equipes de
+   support, equipe.qualite@ et equipe.secretariat@ dans les groupes de
+   profession) ne fait entrer personne dans le service qui l'accueille.
+   Source « <groupe du service ou du pole> ». Les lignes de groupe tenues
+   a la main (point 1) restent lues, pour un role particulier comme
+   l'Administrateur des Operations.
+
 Pont : lieux_cycle avec le sujet « action:portail_droits_groupes confirmer ».
 """
 
@@ -72,13 +87,15 @@ ONGLET = "Portail - Droits"
 ONGLET_SAISIE = "Saisie - Collaborateurs"
 ONGLET_SERVICES = "Services - Responsables"
 ONGLET_DEPARTEMENTS = "Départements"
+ONGLET_POLES = "Services - Pôles"
 COLONNES = ["Adresse", "Nom", "Rôle", "Département", "Service", "Pôle", "Codes de responsable", "Écrans", "Groupe source", "Actif", "Remarque"]
 ROLES = ("Super-administrateur", "Administrateur", "Responsable de département", "Responsable de service", "Membre")
 PREFIXE_MIROIR = "Miroir"
 PREFIXE_ANCIEN = "Membre de "
 PREFIXE_PARTI = "N'est plus"
 COMPTES_DE_SERVICE = {"rh@almaval.ch", "administration@almaval.ch", "gestion@almaval.ch", "contact@almaval.ch",
-                      "formation@almaval.ch", "comptabilite@almaval.ch", "inventaire@almaval.ch", "logistique@almaval.ch"}
+                      "formation@almaval.ch", "comptabilite@almaval.ch", "inventaire@almaval.ch", "logistique@almaval.ch",
+                      "qualite@almaval.ch", "noreply@almaval.ch", "listecontacts@almaval.ch", "consulting@almaval.ch", "it@almaval.ch"}
 ADMIN_PAR_DEFAUT = {"am.forte@almaval.ch", "gestion@almaval.ch"}
 FUSEAU = zoneinfo.ZoneInfo("Europe/Zurich")
 
@@ -148,8 +165,116 @@ def _lire_services():
         if not nom or not _actif(l.get("Actif")):
             continue
         out.append({"service": nom, "responsable": _s(l.get("Responsable")).strip(), "initiales": _s(l.get("Initiales")).strip(),
-                    "departement": _s(l.get("Département (gouvernance 2026)") or l.get("Département")).strip()})
+                    "departement": _s(l.get("Département (gouvernance 2026)") or l.get("Département")).strip(),
+                    "groupe": _s(l.get("Groupe Google")).strip().lower()})
     return out
+
+
+def _lire_poles():
+    """Services - Poles : une ligne par pole actif (Service, Pole, Departement, Groupe Google, Pole parent).
+
+    Le parent d'un pole est la colonne « Pôle parent » si elle est remplie (cas d'un libelle garde court
+    pour les postes et les affectations, comme « Intendance » sous « Locaux »), sinon ce qui precede le
+    dernier « > » du libelle (« Locaux > Entretien » est sous « Locaux »), sinon le service.
+    """
+    _, lignes = _tableau(_lire(ID_LISTES, "'" + ONGLET_POLES + "'!A1:L200"))
+    out = []
+    for l in lignes:
+        service, pole = _s(l.get("Service")).strip(), _s(l.get("Pôle")).strip()
+        if not service or not pole or not _actif(l.get("Actif")):
+            continue
+        parent = _s(l.get("Pôle parent")).strip()
+        if not parent and " > " in pole:
+            parent = pole.rsplit(" > ", 1)[0].strip()
+        out.append({"service": service, "pole": pole, "departement": _s(l.get("Département")).strip(),
+                    "groupe": _s(l.get("Groupe Google")).strip().lower(), "parent": parent,
+                    "segment": pole.rsplit(" > ", 1)[-1].strip()})
+    return out
+
+
+def _chaine_pole(pole, poles_du_service):
+    """Les libelles du pole et de ses ancetres, du plus haut au pole lui-meme."""
+    par_libelle = {p["pole"]: p for p in poles_du_service}
+    chaine, vus, courant = [], set(), pole
+    while courant and courant in par_libelle and courant not in vus:
+        vus.add(courant)
+        chaine.insert(0, courant)
+        courant = par_libelle[courant]["parent"]
+    return chaine
+
+
+def _descendants(pole, poles_du_service):
+    """Le pole et tous ceux dont il est un ancetre."""
+    return [q["pole"] for q in poles_du_service if pole in _chaine_pole(q["pole"], poles_du_service)]
+
+
+_DIRECTS = {}
+
+
+def _utilisateurs_directs(groupe):
+    """Les comptes membres DIRECTS d'un groupe (type USER, actifs, hors comptes de service)."""
+    if groupe in _DIRECTS:
+        return _DIRECTS[groupe]
+    membres, jeton = [], None
+    while True:
+        rep = outils_annuaire._groupes().members().list(groupKey=groupe, maxResults=200, pageToken=jeton).execute()
+        membres.extend(rep.get("members", []))
+        jeton = rep.get("nextPageToken")
+        if not jeton:
+            break
+    out = []
+    for m in membres:
+        a = _s(m.get("email")).strip().lower()
+        if not a or _s(m.get("type")).upper() != "USER" or _s(m.get("status")).upper() not in ("", "ACTIVE"):
+            continue
+        if a in COMPTES_DE_SERVICE or a in out:
+            continue
+        out.append(a)
+    _DIRECTS[groupe] = out
+    return out
+
+
+def _droits_par_arbre(services, poles, vouloir, rendu):
+    """Source 4 : l'arbre Services - Responsables > Services - Poles, par leurs groupes Google."""
+    _DIRECTS.clear()
+    dep_service = {sv["service"]: sv["departement"] for sv in services}
+    for sv in services:
+        if not sv["groupe"] or "@" not in sv["groupe"]:
+            continue
+        les_poles = [p for p in poles if p["service"] == sv["service"] and p["groupe"] and "@" in p["groupe"]]
+        try:
+            membres_service = list(_utilisateurs_directs(sv["groupe"]))
+        except Exception as err:  # noqa: BLE001
+            rendu["avertissements"].append("Groupe du service " + sv["service"] + " illisible (" + sv["groupe"] + ") : " + _s(err)[:120])
+            continue
+        par_pole = {}
+        for p in les_poles:
+            try:
+                par_pole[p["pole"]] = list(_utilisateurs_directs(p["groupe"]))
+            except Exception as err:  # noqa: BLE001
+                rendu["avertissements"].append("Groupe du pole " + sv["service"] + " > " + p["pole"] + " illisible (" + p["groupe"] + ") : " + _s(err)[:120])
+                par_pole[p["pole"]] = []
+        # Un pole compte aussi les membres de ses descendants (« Locaux » contient « Intendance » et « Locaux > Entretien »).
+        membres_pole = {}
+        for p in les_poles:
+            tous = []
+            for q in _descendants(p["pole"], les_poles):
+                for a in par_pole.get(q, []):
+                    if a not in tous:
+                        tous.append(a)
+            membres_pole[p["pole"]] = tous
+        for tous in membres_pole.values():
+            for a in tous:
+                if a not in membres_service:
+                    membres_service.append(a)
+        departement = sv["departement"]
+        for a in membres_service:
+            vouloir(a, "Membre", departement, sv["service"], "", "", sv["groupe"])
+        for p in les_poles:
+            for a in membres_pole[p["pole"]]:
+                vouloir(a, "Membre", departement or dep_service.get(p["service"], p["departement"]), sv["service"], p["pole"], "", p["groupe"])
+        rendu["sources"]["Arbre : " + sv["service"]] = {"groupe": sv["groupe"], "membres": len(membres_service),
+                                                         "poles": {p["pole"]: len(membres_pole[p["pole"]]) for p in les_poles}}
 
 
 def _adresses_par_initiales():
@@ -326,6 +451,9 @@ def passage_droits_groupes(confirmer=False):
             continue
         vouloir(a, "Responsable de service", sv["departement"], sv["service"], "", "", "Listes : " + ONGLET_SERVICES, sv["responsable"])
     rendu["sources"]["Listes : " + ONGLET_SERVICES] = {"services": len(services), "responsables_sans_adresse": sans_adresse}
+
+    # 4. L'arbre des services et des poles, par leurs groupes Google.
+    _droits_par_arbre(services, _lire_poles(), vouloir, rendu)
     if sans_adresse:
         rendu["avertissements"].append("Responsables sans adresse Almaval dans Saisie - Collaborateurs : " + ", ".join(sans_adresse))
 
