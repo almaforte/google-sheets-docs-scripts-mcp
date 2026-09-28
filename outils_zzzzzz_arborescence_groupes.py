@@ -6,8 +6,8 @@ Decision d'Alberto du 28.09.2026 : les groupes Google suivent l'organigramme.
 Un groupe par departement (dpt.), qui contient les groupes de ses services
 (service.), qui contiennent les groupes de leurs poles (sans prefixe), qui
 contiennent ceux de leurs sous-poles (le pole devant : psy.assistants@,
-locaux.entretien@). Le nom affiche suit l'arbre : « Administratif >
-Logistique > Locaux > Intendance ». Les droits d'AlmaDesk Admin se branchent
+locaux.entretien@). Le nom affiche suit l'arbre : « Administratif ›
+Logistique › Locaux › Intendance » (Google refuse le chevron >). Les droits d'AlmaDesk Admin se branchent
 sur ces memes groupes (outils_zzzzz_portail_droits, source 4). Alberto a
 demande le 28.09.2026 que la creation soit protocolee et que les groupes se
 nourrissent tout seuls quand l'organigramme evoluera : c'est ce passage, lance
@@ -56,6 +56,7 @@ Ponts : lieux_cycle avec « action:arborescence_groupes [confirmer] » et
 
 import datetime
 import re
+import time
 import unicodedata
 
 import main
@@ -71,6 +72,9 @@ except Exception:  # noqa: BLE001
 DOMAINE = "almaval.ch"
 PROPRIETAIRE = "administration@almaval.ch"
 SEPARATEUR = " > "
+# Google refuse les chevrons < et > dans le nom et la description d'un groupe (« Invalid Input: groupName »,
+# constate le 28.09.2026) : le nom affiche separe les niveaux par un guillemet simple, visuellement proche.
+SEPARATEUR_NOM = " › "
 ONGLET_REGLES = "Groupes - Règles"
 ONGLET_AFFECTATIONS = "Saisie - Affectations"
 ONGLET_ENGAGEMENTS = "Effectif - Engagements"
@@ -349,18 +353,45 @@ def passage_arborescence(confirmer=False, retirer_redondances=True, alimenter=Tr
     for cle, n in ordre:
         if _fiche(n["groupe"], cache) is not None:
             continue
-        nom = SEPARATEUR.join(n["chemin"])
+        nom = SEPARATEUR_NOM.join(n["chemin"])
         rendu["creations"].append({"adresse": n["groupe"], "nom": nom})
         if not confirmer:
             continue
         try:
             outils_annuaire._groupes().groups().insert(body={"email": n["groupe"], "name": nom,
                                                              "description": n["niveau"] + " " + nom + " de l'organigramme d'Almaval. Groupe créé et tenu par l'arborescence des groupes."}).execute()
-            outils_annuaire._groupes().members().insert(groupKey=n["groupe"], body={"email": PROPRIETAIRE, "role": "OWNER"}).execute()
-            rendu["creations"][-1]["parametres"] = _parametrer(n["groupe"])
+            cache.pop(n["groupe"], None)
+            # Un groupe tout juste cree n'est pas aussitot joignable : sa liste de membres repond 404 pendant quelques secondes.
+            for _essai in range(15):
+                time.sleep(3)
+                cache.pop(n["groupe"], None)
+                if _fiche(n["groupe"], cache) is not None:
+                    break
             cache.pop(n["groupe"], None)
         except Exception as err:  # noqa: BLE001
             rendu["erreurs"].append("Création de " + n["groupe"] + " : " + _s(err)[:200])
+
+    # 2 bis. Garanties sur chaque groupe de l'arbre : administration@ proprietaire (regle d'Alberto du 09.09.2026) ;
+    # un groupe qui ne l'avait pas encore (en pratique un groupe neuf) recoit aussi les parametres de la maison.
+    for cle, n in ordre:
+        f = _fiche(n["groupe"], cache)
+        if f is None:
+            continue
+        roles = {c["adresse"]: c["role"] for c in f["comptes"]}
+        if roles.get(PROPRIETAIRE) == "OWNER":
+            continue
+        rendu.setdefault("proprietaires", []).append(f["adresse"])
+        if not confirmer:
+            continue
+        try:
+            if PROPRIETAIRE in roles:
+                outils_annuaire._groupes().members().patch(groupKey=f["adresse"], memberKey=PROPRIETAIRE, body={"role": "OWNER"}).execute()
+            else:
+                outils_annuaire._groupes().members().insert(groupKey=f["adresse"], body={"email": PROPRIETAIRE, "role": "OWNER"}).execute()
+            f["comptes"].append({"adresse": PROPRIETAIRE, "role": "OWNER"})
+            rendu.setdefault("parametres", {})[f["adresse"]] = _parametrer(f["adresse"])
+        except Exception as err:  # noqa: BLE001
+            rendu["erreurs"].append("Propriétaire de " + f["adresse"] + " : " + _s(err)[:200])
 
     # 3. Imbrications, redondances et noms.
     def cles_de(f):
@@ -391,8 +422,10 @@ def passage_arborescence(confirmer=False, retirer_redondances=True, alimenter=Tr
                         if "412" in texte or "Condition not met" in texte:
                             texte = "412, le parent porte sans doute le libellé de groupe de sécurité : " + texte[:120]
                         rendu["erreurs"].append("Imbrication de " + f["adresse"] + " dans " + p["adresse"] + " : " + texte[:220])
-            # Imbrication directe dans un ancetre plus haut que le parent : redondante.
-            anc = noeuds.get(pn["parent"]) if pn and pn.get("parent") else None
+            # Imbrication directe dans un ancetre plus haut que le parent : redondante, retiree SEULEMENT une fois
+            # l'imbrication voulue en place, sinon le groupe sortirait un temps de son service.
+            en_place = p is not None and bool(cles_de(f).intersection(p["enfants"]))
+            anc = noeuds.get(pn["parent"]) if pn and pn.get("parent") and en_place else None
             while anc:
                 a = _fiche(anc["groupe"], cache)
                 if a is not None:
@@ -406,7 +439,7 @@ def passage_arborescence(confirmer=False, retirer_redondances=True, alimenter=Tr
                             except Exception as err:  # noqa: BLE001
                                 rendu["erreurs"].append("Retrait de la redondance " + f["adresse"] + " dans " + a["adresse"] + " : " + _s(err)[:160])
                 anc = noeuds.get(anc["parent"]) if anc.get("parent") else None
-        nom = SEPARATEUR.join(n["chemin"])
+        nom = SEPARATEUR_NOM.join(n["chemin"])
         if f["nom"] != nom:
             rendu["noms"].append({"adresse": f["adresse"], "avant": f["nom"], "apres": nom})
             if confirmer:
