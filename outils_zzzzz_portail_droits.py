@@ -41,6 +41,9 @@ Regles :
   ni par « Membre de » ni par « N'est plus ») n'est jamais touchee et
   prime sur la ligne miroir de meme cle, qui n'est alors pas ecrite ;
 - les Codes de responsable d'une ligne existante ne sont jamais ecrases ;
+- les super-administrateurs par defaut du code (am.forte@, gestion@) ne
+  recoivent aucune ligne miroir : ils tiennent tout par le code et
+  n'apparaissent pas dans l'organigramme des droits ;
 - rien n'est supprime ; sans « confirmer », le passage simule et rend ce
   qu'il ecrirait ; apres ecriture, relecture et comptage.
 
@@ -240,6 +243,8 @@ def passage_droits_groupes(confirmer=False):
     voulues = {}
 
     def vouloir(adresse, role, departement, service, pole, ecrans, source, nom=""):
+        if _s(adresse).strip().lower() in ADMIN_PAR_DEFAUT:
+            return  # le super-administrateur tient tout par le code : aucune ligne miroir, il n'apparait pas dans l'organigramme des droits
         k = _cle(adresse, role, departement, service, pole)
         if k in voulues:
             return
@@ -276,6 +281,9 @@ def passage_droits_groupes(confirmer=False):
     # 3. Les responsables de service.
     services = _lire_services()
     table = _adresses_par_initiales()
+    for d in departements:  # l'onglet Departements porte aussi initiales -> adresse, en complement de Saisie - Collaborateurs
+        if d["initiales"] and d["adresse"] and d["initiales"] not in table:
+            table[d["initiales"]] = d["adresse"]
     sans_adresse = []
     for sv in services:
         if not sv["initiales"]:
