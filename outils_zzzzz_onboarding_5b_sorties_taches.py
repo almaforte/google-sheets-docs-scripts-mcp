@@ -492,11 +492,17 @@ def _corps_paie(sortie, c):
         ("Éléments de paie signalés", c["elements_paie"] or "aucun"),
     ]
     tableau = "".join("<tr><td>" + _echapper(k) + "</td><td>" + _echapper(v) + "</td></tr>" for k, v in lignes)
+    if c["solde_vacances"] is None:
+        vacances = "en tenant compte du solde de vacances que nous vous confirmerons"
+    elif c["montant_vacances"] >= 0:
+        vacances = "avec le versement du solde de vacances"
+    else:
+        vacances = "avec la retenue des vacances prises en avance"
     return ("<p>Bonjour " + _echapper(CFG["NOM_PAIE"]) + ",</p>"
             "<p>Nous vous annonçons la sortie de " + _echapper(sortie.nom_prenom) + " au " + _jour_texte(sortie.date_sortie)
             + ". Voici les éléments du dernier décompte.</p>"
             "<p><strong>Éléments du dernier décompte</strong></p><table>" + tableau + "</table>"
-            "<p>Merci d'établir le dernier décompte de salaire avec le versement du solde de vacances et de nous transmettre la fiche finale ainsi que le certificat de salaire.</p>")
+            "<p>Merci d'établir le dernier décompte de salaire " + vacances + " et de nous transmettre la fiche finale ainsi que le certificat de salaire.</p>")
 
 
 def t510_decompte_paie(sortie, destinataire):
