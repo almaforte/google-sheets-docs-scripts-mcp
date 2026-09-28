@@ -334,7 +334,7 @@ def _droits_par_arbre(services, poles, vouloir, rendu):
 
 
 def _adresses_par_initiales():
-    """Initiales -> adresse Almaval, lues dans Saisie - Collaborateurs (intitules en ligne 3)."""
+    """Initiales -> adresse Almaval, lues dans Saisie - Collaborateurs (intitules en ligne 3), completees par l'onglet Departements."""
     tetes = _lire(ID_GESTION, "'" + ONGLET_SAISIE + "'!A3:HZ3")
     entetes = [_s(e).strip() for e in (tetes[0] if tetes else [])]
     if "Initiales" not in entetes or "E-mail Almaval" not in entetes:
@@ -348,6 +348,13 @@ def _adresses_par_initiales():
         m = _s(mails[k][0]).strip().lower() if k < len(mails) and mails[k] else ""
         if i and m and "@" in m and i not in table:
             table[i] = m
+    # Complement : les responsables de departement (Alberto n'a pas de ligne dans Saisie - Collaborateurs).
+    try:
+        for d in _lire_departements():
+            if d["initiales"] and d["adresse"] and d["initiales"] not in table:
+                table[d["initiales"]] = d["adresse"]
+    except Exception:  # noqa: BLE001
+        pass
     return table
 
 
