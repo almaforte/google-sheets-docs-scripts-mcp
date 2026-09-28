@@ -73,7 +73,8 @@ Regles :
    une ligne (_compte_personnel) : les adresses hors du domaine (superviseurs
    externes membres d'encadrement@), les comptes suspendus et les comptes de
    service sont ecartes, et un alias est ramene a l'adresse principale, qui
-   est celle qu'AlmaDesk voit a la connexion.
+   est celle qu'AlmaDesk voit a la connexion. Aux points 2 et 3 aussi,
+   l'adresse d'un responsable est ramenee a son adresse principale.
 
 Pont : lieux_cycle avec le sujet « action:portail_droits_groupes confirmer ».
 """
@@ -263,6 +264,15 @@ def _compte_personnel(adresse):
     fiche = ann["principaux"].get(a)
     if not fiche or fiche["suspendu"] or a in COMPTES_DE_SERVICE or fiche["unite"].startswith(UNITES_DE_SERVICE):
         return ""
+    return a
+
+
+def _principale(adresse):
+    """L'adresse principale d'un compte Almaval quand l'adresse donnee en est un alias (c.martenet@ -> social@)."""
+    a = _s(adresse).strip().lower()
+    ann = _annuaire()
+    if a and ann.get("ok"):
+        return ann["alias"].get(a, a)
     return a
 
 
@@ -466,7 +476,8 @@ def passage_droits_groupes(confirmer=False):
     voulues = {}
 
     def vouloir(adresse, role, departement, service, pole, ecrans, source, nom=""):
-        if _s(adresse).strip().lower() in ADMIN_PAR_DEFAUT:
+        adresse = _principale(adresse)  # AlmaDesk reconnait la personne par son adresse principale, jamais par un alias
+        if adresse in ADMIN_PAR_DEFAUT:
             return  # le super-administrateur tient tout par le code : aucune ligne miroir, il n'apparait pas dans l'organigramme des droits
         k = _cle(adresse, role, departement, service, pole)
         if k in voulues:
