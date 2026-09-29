@@ -159,6 +159,16 @@ def dsas_population(q, donnees):
             ept_ref = next((v for v in reversed(epts) if v > 0), 0.0)
         e_vaud = dict(e)
         e_vaud["EPT total"] = ept_ref
+        # Lieux de pratique : quand le regime de reference n'a pas de grille, la
+        # grille de l'engagement passe avant « Lieux de travail », comme pour le taux
+        # (cas d'un avenant qui ne nomme ni jours ni lieux, 29.09.2026).
+        if not dsas_sites_du_regime(r_ref):
+            sites_e = []
+            for v in _grille_brute(e):
+                if v and v not in DSAS["SITES_EXCLUS"] and v not in DSAS["SITES_HORS_MUTATION"] and v not in sites_e:
+                    sites_e.append(v)
+            if sites_e:
+                e_vaud["Lieux de travail"] = ", ".join(sites_e)
         x = par_ini.get(ini)
         if not x:
             par_ini[ini] = {"e": e_vaud, "p": p, "ini": ini, "prof": prof, "deb": deb, "fin": fin,
