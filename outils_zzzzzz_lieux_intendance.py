@@ -18,7 +18,8 @@ CE QUE FAIT CE MODULE, sans retoucher les gros modules :
    commence par Menage, Intendance ou Nettoyage est retire de la case du
    bureau et depose dans la colonne Intendance du meme batiment, meme jour,
    meme demi-journee, une seule fois, sous la forme « Menage 18h30-21h30 »,
-   celle qu'emploie deja le registre. Vaut pour la vue du jour
+   celle qu'emploie deja le registre, trait d'union court compris : un
+   libelle identique a celui du registre ne s'affiche qu'une fois. Vaut pour la vue du jour
    (_ponctuels_semaine du registre) et pour l'onglet masque « Occupation
    bureaux - Ponctuel » d'Almaval - Patients (_ponctuels_datees), que le
    script 10_occupation_date superpose a la date choisie.
@@ -60,7 +61,7 @@ def _libelle_menage(libelle) -> str:
     if not m:
         return "Ménage"
     h0, m0, h1, m1 = m.groups()
-    return "Ménage " + str(int(h0)).zfill(2) + "h" + m0 + "–" + str(int(h1)).zfill(2) + "h" + m1
+    return "Ménage " + str(int(h0)).zfill(2) + "h" + m0 + "-" + str(int(h1)).zfill(2) + "h" + m1
 
 
 _poses = []
