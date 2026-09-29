@@ -135,5 +135,27 @@ try:
 except Exception as _exc:  # noqa: BLE001
     print("[lieux intendance] ponctuel daté non greffé : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
 
+# ------------------------------------------------ 3. l'horaire seul dans la case
+# La remarque d'une ligne de menage du registre peut porter le marqueur
+# technique « Registre seul » (Vevey, 29.09.2026) : il s'affichait dans la
+# case, « Menage 18h30-20h30, Registre seul », et empechait de reconnaitre
+# le meme passage venu de l'agenda. La case ne garde que l'horaire.
+try:
+    import outils_lieux as _ol
+
+    _valeur_amont = _ol._valeur_affichee
+
+    def _valeur_affichee_intendance(occupant, remarque):
+        texte = str(remarque or "")
+        if _normaliser_origine(occupant) == "MENAGE":
+            texte = ", ".join(p.strip() for p in texte.split(",")
+                              if p.strip() and _normaliser_origine(p) != "REGISTRE SEUL")
+        return _valeur_amont(occupant, texte)
+
+    _ol._valeur_affichee = _valeur_affichee_intendance
+    _poses.append("horaire du ménage")
+except Exception as _exc:  # noqa: BLE001
+    print("[lieux intendance] horaire non greffé : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
+
 print("[lieux intendance] ménage des agendas déposé dans la colonne Intendance ; "
       "Intendance compris comme Ménage ; posé dans : " + ", ".join(_poses), flush=True)
