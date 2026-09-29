@@ -36,6 +36,9 @@ _m.DSAS["HORS_VAUD"] = ["Genève"]
 _m.DSAS["SITES_EXCLUS"] = ["Genève", "Télétravail", "Non travaillé"]
 _m.DSAS["SITES_HORS_MUTATION"] = ["Télétravail", "Non travaillé"]
 _m._JOURS_NOMS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+# 29.09.2026, demande d'Alberto : le brouillon pour la DSAS ne porte plus
+# am.forte@ en copie, seulement formation@.
+_m.DSAS_COURRIELS["DSAS_COPIE"] = "formation@almaval.ch"
 
 # Les fonctions ci-dessous sont écrites ici puis réinstallées dans l'espace de
 # noms du module d'origine, pour que dsas_calculer les appelle et qu'elles y
