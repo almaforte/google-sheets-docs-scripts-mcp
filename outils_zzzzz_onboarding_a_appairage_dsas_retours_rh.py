@@ -2,28 +2,37 @@
 
 Chargé juste après ce module (ordre alphabétique de bootstrap.py), il remplace
 dans son espace de noms dsas_population et dsas_evolutions, et y ajoute les
-aides de lecture des grilles. Règles posées par les RH et validées le
-29.09.2026 :
+aides de lecture des grilles.
 
-  1. On déclare toute personne en formation rattachée à Vaud, psychologie
-     clinique comprise : ORIENTATIONS_EXCLUES est vidé.
-  2. Le rattachement est celui du contrat et suit les mutations : il se lit
-     dans les régimes qui recouvrent le trimestre, à défaut dans
-     l'engagement (Inan Nuriye, Vétois Matthieu).
-  3. Une personne « En formation » à un moment du trimestre figure, même si
-     elle est diplômée à la fin (Bober Anita) ; le passage du statut de
-     formation à un autre statut donne « Fin d'encadrement au » la veille
-     du régime suivant.
-  4. Toute mutation de site se signale jour par jour, Genève compris
-     (Vétois Matthieu) ; la colonne des lieux de pratique reste sans Genève.
-  5. Une sortie s'écrit « Sortie et fin d'encadrement au ».
+Instruction définitive, validée le 29.09.2026 à 19 h par la direction et les
+RH, qui remplace le critère du canton de rattachement posé le même jour :
+
+  1. Toute personne en formation de psychothérapie ou de psychiatrie, avec un
+     EPT clinique supérieur à zéro et au moins un lieu de travail sur le
+     canton de Vaud pendant le trimestre, figure au tableau. Le canton de
+     rattachement du contrat ne compte plus.
+  2. Le seul taux écrit au tableau est l'EPT présent dans le canton de Vaud :
+     l'EPT clinique multiplié par la part des demi-journées travaillées sur un
+     site vaudois (Genève hors Vaud ; télétravail et jours non travaillés hors
+     du calcul). Sans grille, la liste « Lieux de travail » puis le canton
+     d'exercice servent de repli.
+  3. La psychologie clinique reste hors du tableau : la question est posée à
+     la DSAS dans le courriel (ORIENTATIONS_EXCLUES = Clinique).
+  4. Une personne « En formation » à un moment du trimestre figure, même si
+     elle est diplômée à la fin ; le passage du statut de formation à un autre
+     statut donne « Fin d'encadrement au » la veille du régime suivant.
+  5. Toute mutation de site se signale jour par jour, Genève compris ; la
+     colonne des lieux de pratique reste sans Genève. Un changement de taux
+     s'entend de l'EPT présent dans le canton de Vaud.
+  6. Une sortie s'écrit « Sortie et fin d'encadrement au ».
 """
 
 import types
 
 import outils_zzzzz_onboarding_a_appairage_dsas as _m
 
-_m.DSAS["ORIENTATIONS_EXCLUES"] = []
+_m.DSAS["ORIENTATIONS_EXCLUES"] = ["Clinique"]
+_m.DSAS["HORS_VAUD"] = ["Genève"]
 _m.DSAS["SITES_EXCLUS"] = ["Genève", "Télétravail", "Non travaillé"]
 _m.DSAS["SITES_HORS_MUTATION"] = ["Télétravail", "Non travaillé"]
 _m._JOURS_NOMS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
@@ -72,13 +81,47 @@ def dsas_grille_texte(g):
     return ", ".join(l + " " + _liste_fr([n for n in _JOURS_NOMS if g.get(n) == l]) for l in lieux)
 
 
+def _grille_brute(r):
+    """Les douze demi-journees d'une ligne (regime ou engagement)."""
+    return [_s(r.get(j)).strip() for j in DSAS["JOURS"]] if r else []
+
+
+def dsas_part_vaud(r, e):
+    """Part des demi-journees travaillees sur un site vaudois, entre 0 et 1.
+    Grille du regime, sinon celle de l'engagement, sinon « Lieux de travail »,
+    sinon le canton d'exercice."""
+    for grille in (_grille_brute(r), _grille_brute(e)):
+        phys = [v for v in grille if v and v not in DSAS["SITES_HORS_MUTATION"]]
+        if phys:
+            return sum(1 for v in phys if v not in DSAS["HORS_VAUD"]) / len(phys)
+    lieux = [l.strip() for l in _s(e.get("Lieux de travail")).split(",") if l.strip()]
+    lieux = [l for l in lieux if l not in DSAS["SITES_HORS_MUTATION"]]
+    if lieux:
+        return sum(1 for l in lieux if l not in DSAS["HORS_VAUD"]) / len(lieux)
+    canton = _s((r or {}).get("Canton d'exercice")).strip() or _s(e.get("Canton d'exercice")).strip()
+    return 1.0 if canton == DSAS["CANTON"] else 0.0
+
+
+def dsas_ept_vaud(r, e):
+    """EPT clinique present dans le canton de Vaud, arrondi au centieme."""
+    clin = dsas_nombre((r or {}).get("EPT clinique")) if r else None
+    if clin is None:
+        clin = dsas_nombre(e.get("EPT clinique"))
+    if clin is None:
+        clin = dsas_nombre((r or {}).get("EPT total")) if r else dsas_nombre(e.get("EPT total"))
+    if not clin:
+        return 0.0
+    return round(clin * dsas_part_vaud(r, e) + 1e-9, 2)
+
+
 def dsas_population(q, donnees):
     par_ini, a_verifier, exclus_orientation = {}, 0, 0
     for e in donnees["engagements"]:
         ini = _s(e.get("Initiales")).strip()
         if not ini or ini in DSAS["INITIALES_EXCLUES"]:
             continue
-        regs_q = dsas_regimes_du_trimestre(donnees["regimes"].get(ini, []), q)
+        regs = donnees["regimes"].get(ini, [])
+        regs_q = dsas_regimes_du_trimestre(regs, q)
         en_formation = "formation" in _s(e.get("Statut")).lower() \
             or any("formation" in _s(r.get("Statut")).lower() for r in regs_q)
         if not en_formation:
@@ -92,15 +135,9 @@ def dsas_population(q, donnees):
         fin = dsas_date(e.get("Date de fin"))
         if fin and dsas_j(fin) < dsas_j(q["debut"]):
             continue
-        # Canton de rattachement : celui des regimes du trimestre, qui suivent
-        # les mutations ; a defaut, celui de l'engagement (29.09.2026).
-        cantons = [_s(r.get("Canton d'exercice")).strip() for r in regs_q]
-        cantons = [c for c in cantons if c and c != "-"]
-        canton = DSAS["CANTON"] if DSAS["CANTON"] in cantons else (cantons[-1] if cantons
-                                                                     else _s(e.get("Canton d'exercice")).strip())
-        if canton != DSAS["CANTON"]:
-            if not canton or canton == "-":
-                a_verifier += 1
+        # Presence clinique dans le canton de Vaud pendant le trimestre.
+        epts = [dsas_ept_vaud(r, e) for r in regs_q] if regs_q else [dsas_ept_vaud(None, e)]
+        if max(epts) <= 0:
             continue
         p = donnees["personnes"].get(ini)
         if not p:
@@ -110,9 +147,18 @@ def dsas_population(q, donnees):
         if aff and _s(aff.get("Orientation")).strip() in DSAS["ORIENTATIONS_EXCLUES"]:
             exclus_orientation += 1
             continue
+        # Taux du tableau : EPT present dans le canton de Vaud a la date de reference
+        # (fin du trimestre ou sortie), sinon le dernier regime du trimestre present sur Vaud.
+        ref = fin if fin and dsas_j(fin) < dsas_j(q["fin"]) else q["fin"]
+        r_ref = dsas_regime_au(regs, ref)
+        ept_ref = dsas_ept_vaud(r_ref, e) if (r_ref or not regs_q) else 0.0
+        if ept_ref <= 0:
+            ept_ref = next((v for v in reversed(epts) if v > 0), 0.0)
+        e_vaud = dict(e)
+        e_vaud["EPT total"] = ept_ref
         x = par_ini.get(ini)
         if not x:
-            par_ini[ini] = {"e": e, "p": p, "ini": ini, "prof": prof, "deb": deb, "fin": fin,
+            par_ini[ini] = {"e": e_vaud, "p": p, "ini": ini, "prof": prof, "deb": deb, "fin": fin,
                             "nomPrenom": _s(e.get("Nom prénom") or p.get("Nom prénom")).strip()}
         else:
             if dsas_j(deb) < dsas_j(x["deb"]):
@@ -138,8 +184,13 @@ def dsas_evolutions(x, q, donnees, adresse_precedente, adresse_actuelle, nom_de)
             continue
         if x["fin"] and dsas_j(d) > dsas_j(x["fin"]):
             continue
-        a, b = dsas_nombre(regs[i - 1].get("EPT total")), dsas_nombre(regs[i].get("EPT total"))
-        if a is not None and b is not None and abs(a - b) > 1e-9:
+        a, b = dsas_ept_vaud(regs[i - 1], x["e"]), dsas_ept_vaud(regs[i], x["e"])
+        if a > 0 and b <= 0:
+            veille = d - datetime.timedelta(days=1)
+            ev.append([dsas_j(veille), "Fin d'activité dans le canton de Vaud au " + dsas_fmt(veille)])
+        elif a <= 0 and b > 0:
+            ev.append([dsas_j(d), "Début d'activité dans le canton de Vaud au " + dsas_fmt(d)])
+        elif abs(a - b) > 1e-9:
             ev.append([dsas_j(d), "Changement de taux au " + dsas_fmt(d) + " (" + str(_js_round(a * 100)) + " % puis "
                        + str(_js_round(b * 100)) + " %)"])
         g0, g1 = dsas_grille(regs[i - 1]), dsas_grille(regs[i])
@@ -191,6 +242,7 @@ def dsas_evolutions(x, q, donnees, adresse_precedente, adresse_actuelle, nom_de)
     return [u[1] for u in ev]
 
 
-for _f in (dsas_regimes_du_trimestre, dsas_grille, _liste_fr, dsas_grille_texte, dsas_population, dsas_evolutions):
+for _f in (dsas_regimes_du_trimestre, dsas_grille, _liste_fr, dsas_grille_texte, _grille_brute, dsas_part_vaud,
+           dsas_ept_vaud, dsas_population, dsas_evolutions):
     setattr(_m, _f.__name__, types.FunctionType(_f.__code__, _m.__dict__, _f.__name__, _f.__defaults__))
-print("[dsas retours rh 29.09.2026] greffe posée", flush=True)
+print("[dsas instruction définitive 29.09.2026] greffe posée", flush=True)
