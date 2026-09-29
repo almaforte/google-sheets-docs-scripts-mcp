@@ -1,8 +1,8 @@
 """Almaval - sorties : solde de vacances A LA DATE DE SORTIE, une seule source pour tous les ecrans, 29.09.2026.
 
-Revision des taches 80, 510 et 520 du module outils_zzzzz_onboarding_5b_sorties_taches,
+Revision des taches 80, 90, 510 et 520 du module outils_zzzzz_onboarding_5b_sorties_taches,
 chargee apres lui par l'ordre alphabetique des modules. Elle remplace, dans l'espace de
-noms du module 5b, les fonctions _calculs_salaire, t080_solde_vacances,
+noms du module 5b, les fonctions _calculs_salaire, t080_solde_vacances, t090_heures,
 t520_solde_vacances_versement, _corps_paie et executer_les_moteurs ; les lambdas du
 registre MOTEURS et l'enveloppe greffee sur le module 5 les retrouvent par leur nom.
 
@@ -20,10 +20,16 @@ Ce que fait la revision :
       des que la valeur change ; recalcule chaque nuit, meme Fait, jusqu'a un mois apres
       la sortie, tant que la tache n'est pas validee par les RH (marqueur « [validé »).
   520 montant = salaire mensuel effectif / (21,75 x EPT total) x jours ; Sans objet si le
-      solde est nul (moins de 5 CHF) ou si la personne est au salaire horaire ; revue
+      solde est nul (moins d'un vingtieme de jour) ou si la personne est au salaire horaire ; revue
       comme 80.
   510 le brouillon a la paie porte le solde a la date de sortie, la formule du jour de
       travail, et la phrase de cloture juste (versement, retenue, rien, salaire horaire).
+  90  meme lecture qu'avant (dernier mois pose de Mois - Temps), mais sa remarque est
+      remplacee au lieu d'etre empilee nuit apres nuit.
+Un solde de moins d'un vingtieme de jour vaut zero : AlmaDesk l'affiche au dixieme de jour
+(0,0 jour) et rien n'est verse ni retenu.
+Les remarques du robot sur 80, 90 et 520 sont remplacees (jamais empilees) tant que la tache
+n'est pas validee ; les parties ecrites par une personne sont gardees.
 """
 
 import outils_zzzzz_onboarding_5b_sorties_taches as t5b
@@ -48,9 +54,10 @@ JOURS_DE_RECALCUL_APRES_SORTIE = 31
 MARQUEUR_VALIDATION = "[validé"
 PREFIXES_ROBOT = {
     80: ("Solde de vacances", "Aucun mois posé"),
+    90: ("BDU Mois - Temps", "Aucun mois posé"),
     520: ("Solde de vacances", "Solde négatif", "Montant à verser", "Salaire horaire"),
 }
-SEUIL_MONTANT_NUL = 5.0
+SEUIL_JOURS_NUL = 0.05
 
 
 # ------------------------------------------------ revision d'une tache deja reglee
@@ -84,6 +91,9 @@ def _reviser_tache(sortie, ordre, etat, remarque):
         actuel = _s(l.get(col["ETAT"])).strip()
         if etat and etat != actuel and {etat, actuel} <= {"En cours", "Sans objet", "Fait"}:
             objet[col["ETAT"]] = etat
+            if etat in ("Fait", "Sans objet") and actuel == "En cours":
+                objet[col["FAIT_LE"]] = sorties.serial_de(sorties.maintenant())
+                objet[col["FAIT_PAR"]] = sorties.SORTIE67["FAIT_PAR"]
         if objet:
             sorties._poser_objet(ctx, suivi, l, l["_ligne"], objet)
             touchees += 1
@@ -91,8 +101,10 @@ def _reviser_tache(sortie, ordre, etat, remarque):
 
 
 def _poser_ou_reviser(sortie, ordre, etat, remarque):
+    """Une tache deja entamee (En cours, Fait, Sans objet) voit la remarque du robot remplacee ;
+    une tache pas encore entamee passe par marquer_taches du module 5, comme avant."""
     t = _tache(sortie, ordre)
-    if t is not None and t["etat"] in ("Fait", "Sans objet"):
+    if t is not None and t["etat"] in ("En cours", "Fait", "Sans objet"):
         return _reviser_tache(sortie, ordre, etat, remarque)
     return _poser(sortie, ordre, etat, remarque)
 
@@ -170,8 +182,9 @@ def _calculs_salaire(sortie):
         e = sortie.engagement
         s = _solde_a_la_sortie(sortie)
         r["solde"] = s
+        # « periode » reste le dernier mois pose (lu par 90 pour les heures) ; le solde a sa propre periode.
+        r["periode_solde"] = s["periode"] if s else r.get("periode")
         if s:
-            r["periode"] = s["periode"]
             r["solde_vacances"] = s["solde"]
         ept = _nombre(e.get("EPT total"))
         r["ept"] = ept if 0 < ept <= 1.5 else 1.0
@@ -180,7 +193,9 @@ def _calculs_salaire(sortie):
         # Le solde est compte en jours de travail de la personne (cinq semaines a 40 % = dix jours) :
         # un de ses jours vaut le salaire mensuel effectif / (21,75 x EPT total).
         r["journalier"] = round(mensuel / (t5b.JOURS_OUVRES_PAR_MOIS * r["ept"]), 2) if mensuel else 0.0
-        r["montant_vacances"] = 0.0 if r["horaire"] else round(r["journalier"] * (r.get("solde_vacances") or 0.0), 2)
+        solde = r.get("solde_vacances") or 0.0
+        r["solde_nul"] = abs(solde) < SEUIL_JOURS_NUL
+        r["montant_vacances"] = 0.0 if (r["horaire"] or r["solde_nul"]) else round(r["journalier"] * solde, 2)
         return r
     return sortie.memo("calculs_solde_sortie", calc)
 
@@ -199,7 +214,7 @@ def t080_solde_vacances(sortie):
         sorties._poser_objet(sortie.ctx, saisie, sortie.ligne, sortie.ligne["_ligne"], {COL["SOLDE_VACANCES"]: c["solde_vacances"]})
     s = c.get("solde") or {}
     texte_ = ("Solde de vacances à la sortie le " + _jour_texte(sortie.date_sortie) + " : " + _fr(c["solde_vacances"], 2) + " jour(s) ("
-              + s.get("source", "BDU") + ", période " + _s(c.get("periode")) + ")")
+              + s.get("source", "BDU") + ", période " + _s(c.get("periode_solde")) + ")")
     d = _decomposition(s)
     if d:
         texte_ += " = " + d
@@ -219,9 +234,9 @@ def t520_solde_vacances_versement(sortie):
     if c["horaire"]:
         return _poser_ou_reviser(sortie, 520, "Sans objet", "Salaire horaire : vacances payées avec chaque salaire (supplément congés du contrat), "
                                  "aucun solde à verser ni à retenir ; solde indicatif " + _fr(c["solde_vacances"]) + " jour(s)")
-    if abs(c["montant_vacances"]) < SEUIL_MONTANT_NUL:
-        return _poser_ou_reviser(sortie, 520, "Sans objet", "Solde de vacances à la sortie de " + _fr(c["solde_vacances"]) + " jour(s), soit "
-                                 + _chf(c["montant_vacances"]) + " : rien à verser ni à retenir")
+    if c["solde_nul"]:
+        return _poser_ou_reviser(sortie, 520, "Sans objet", "Solde de vacances à la sortie de " + _fr(c["solde_vacances"]) + " jour(s), "
+                                 "soit 0,0 jour au dixième de jour : rien à verser ni à retenir")
     if c["solde_vacances"] < 0:
         return _poser_ou_reviser(sortie, 520, "En cours", "Solde négatif de " + _fr(c["solde_vacances"]) + " jour(s), vacances prises en avance : retenue de "
                                  + _chf(-c["montant_vacances"]) + " (" + jour + ") à arbitrer, inscrite dans le brouillon à la paie (tâche 510)")
@@ -235,8 +250,8 @@ def _texte_solde_paie(sortie, c):
     base = _fr(c["solde_vacances"]) + " jour(s) au " + _jour_texte(sortie.date_sortie)
     if c["horaire"]:
         return base + ", vacances payées avec chaque salaire horaire (supplément congés du contrat) : aucun montant à verser ni à retenir"
-    if abs(c["montant_vacances"]) < SEUIL_MONTANT_NUL:
-        return base + " : aucun montant à verser ni à retenir"
+    if c["solde_nul"]:
+        return base + ", soit 0,0 jour au dixième de jour : aucun montant à verser ni à retenir"
     return (base + ", soit " + _chf(abs(c["montant_vacances"])) + (" à verser" if c["montant_vacances"] > 0 else " à retenir, vacances prises en avance")
             + " (" + _chf(c["journalier"]) + " par jour de travail = " + _chf(c.get("mensuel") or 0) + " / (21,75 x " + _fr(c["ept"], 2) + "))")
 
@@ -246,7 +261,7 @@ def _phrase_de_cloture(c):
         return "en tenant compte du solde de vacances que nous vous confirmerons"
     if c["horaire"]:
         return "sans solde de vacances, les vacances étant payées avec chaque salaire horaire"
-    if abs(c["montant_vacances"]) < SEUIL_MONTANT_NUL:
+    if c["solde_nul"]:
         return "sans solde de vacances à verser ni à retenir"
     if c["montant_vacances"] > 0:
         return "avec le versement du solde de vacances"
@@ -277,6 +292,25 @@ def _corps_paie(sortie, c):
             "<p><strong>Éléments du dernier décompte</strong></p><table>" + tableau + "</table>"
             "<p>Merci d'établir le dernier décompte de salaire " + _phrase_de_cloture(c)
             + " et de nous transmettre la fiche finale ainsi que le certificat de salaire.</p>")
+
+
+def t090_heures(sortie):
+    """Comme le module 5b (dernier mois pose de Mois - Temps), la remarque etant remplacee et non empilee."""
+    c = _calculs_salaire(sortie)
+    if c.get("heures_sup") is None:
+        return _poser_ou_reviser(sortie, 90, "", "Aucun mois posé dans BDU Mois - Temps pour " + sortie.cle)
+    if _validee(_tache(sortie, 90)):
+        return 0
+    total = (c["heures_sup"] or 0.0) + (c["rattrapage"] or 0.0)
+    saisie = sortie.ctx.saisie()
+    ecrit = ""
+    if total and saisie.existe(COL["HEURES_SOLDE"]) and _s(sortie.ligne.get(COL["HEURES_SOLDE"])).strip() == "":
+        sorties._poser_objet(sortie.ctx, saisie, sortie.ligne, sortie.ligne["_ligne"], {COL["HEURES_SOLDE"]: round(total, 2)})
+        ecrit = " ; « " + COL["HEURES_SOLDE"] + " » = " + _fr(total) + " h écrit dans la fiche"
+    return _poser_ou_reviser(sortie, 90, "En cours", "BDU Mois - Temps, période " + _s(c.get("periode")) + " : heures supplémentaires "
+                             + _fr(c["heures_sup"]) + " h, rattrapage " + _fr(c["rattrapage"]) + " h, écart de pointage cumulé sur l'année "
+                             + _fr(c["ecart_pointage"]) + " h" + ecrit + " ; l'arbitrage (heures à payer, à compenser ou négatives) reste humain, à inscrire dans « "
+                             + COL["HEURES_SOLDE"] + " »" + (" ; éléments de paie : " + c["elements_paie"] if c.get("elements_paie") else ""))
 
 
 # ------------------------------------------------ le crochet : 80 et 520 revues meme reglees
@@ -324,6 +358,7 @@ def _installer():
     t5b._calculs_salaire = _calculs_salaire
     t5b.t080_solde_vacances = t080_solde_vacances
     t5b.t520_solde_vacances_versement = t520_solde_vacances_versement
+    t5b.t090_heures = t090_heures
     t5b._corps_paie = _corps_paie
     t5b.executer_les_moteurs = executer_les_moteurs
     t5b._revision_solde_sortie = True
