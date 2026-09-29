@@ -245,6 +245,52 @@ def dsas_evolutions(x, q, donnees, adresse_precedente, adresse_actuelle, nom_de)
     return [u[1] for u in ev]
 
 
+# Courriel pour la DSAS, 29.09.2026 : le périmètre suit l'instruction définitive
+# (lieu de travail dans le canton de Vaud, taux présent sur Vaud), et la question
+# sur la psychologie clinique figure dans le brouillon tant que la DSAS n'y a pas
+# répondu. QUESTION_CLINIQUE à False le jour où la réponse arrive.
+_m.DSAS_COURRIELS["QUESTION_CLINIQUE"] = True
+_corps_dsas_d_origine = _m.dsas_corps_dsas
+_NOMBRES = {1: "Une", 2: "Deux", 3: "Trois", 4: "Quatre", 5: "Cinq", 6: "Six", 7: "Sept", 8: "Huit", 9: "Neuf", 10: "Dix"}
+
+
+def _bloc_question_clinique(n):
+    if not n or not _m.DSAS_COURRIELS.get("QUESTION_CLINIQUE"):
+        return ""
+    qui = ("Une personne de notre équipe suit" if n == 1
+           else (_NOMBRES.get(n) or str(n)) + " de nos collaboratrices suivent")
+    return ("<p><strong>Une question sur le périmètre</strong></p>"
+            + "<p>" + qui + " une formation postgrade en psychologie clinique, et non en psychothérapie. "
+            + "Sauf erreur de notre part, la "
+            + _m.dsas_lien("https://www.fedlex.admin.ch/eli/cc/2012/268/fr", "loi sur les professions de la psychologie")
+            + " distingue cinq domaines de titres postgrades fédéraux (art. 8), et seule la psychothérapie exercée "
+            + "sous propre responsabilité professionnelle relève d'une autorisation cantonale (art. 22). "
+            + "Votre modèle vise par ailleurs les psychothérapeutes assistant·e·s. La "
+            + _m.dsas_lien("https://www.bag.admin.ch/fr/liste-des-filieres-de-formation-postgrade-accreditees",
+                           "liste des filières de formation postgrade accréditées")
+            + " permet de distinguer ces formations. Pourriez-vous s'il vous plaît nous indiquer si vous souhaitez "
+            + "que ces personnes figurent aussi dans l'annonce trimestrielle ? Dans l'affirmative, nous les ajouterons "
+            + "dès le prochain envoi.</p>")
+
+
+def _corps_dsas(q, compte, url_tableau, dossier):
+    html = _corps_dsas_d_origine(q, compte, url_tableau, dossier)
+    html = html.replace(
+        "personnes en formation rattachées au canton de Vaud et actives pendant le trimestre,",
+        "personnes en formation qui ont exercé dans le canton de Vaud pendant le trimestre,")
+    html = html.replace(
+        "<li>Afin de vous offrir",
+        "<li>Le taux indiqué est celui de l'activité exercée dans le canton de Vaud : pour une personne qui travaille "
+        + "aussi sur notre site de Genève, seule la part vaudoise figure.</li><li>Afin de vous offrir", 1)
+    bloc = _bloc_question_clinique(compte.get("exclusOrientation") or 0)
+    if bloc:
+        fin = "<p>Nous restons naturellement"
+        html = html.replace(fin, bloc + fin, 1) if fin in html else html.replace("</div>", bloc + "</div>", 1)
+    return html
+
+
+_m.dsas_corps_dsas = _corps_dsas
+
 for _f in (dsas_regimes_du_trimestre, dsas_grille, _liste_fr, dsas_grille_texte, _grille_brute, dsas_part_vaud,
            dsas_ept_vaud, dsas_population, dsas_evolutions):
     setattr(_m, _f.__name__, types.FunctionType(_f.__code__, _m.__dict__, _f.__name__, _f.__defaults__))
