@@ -32,9 +32,11 @@ Ce que dit chaque carte, et d'où cela vient :
   - axes et âge des patients : Registre - Profil clinique, à défaut
     Places disponibles ;
   - langues : Registre - Personnes et Places disponibles ;
-  - nouveaux patients (médecins et psychologues seulement) : oui si
-    Places disponibles porte des places, non sinon ; « à confirmer » si la
-    ligne n'a pas été mise à jour depuis plus de 30 jours ;
+  - nouveaux patients (médecins et psychologues seulement) : médecins non
+    d'office, oui seulement si des places de psychothérapie sont ouvertes ;
+    psychologues oui si Places disponibles porte des places, non sinon,
+    « à confirmer » si la ligne n'a pas été mise à jour depuis plus de
+    30 jours ;
   - boutons de rendez-vous : les liens d'agenda de la colonne « Plannings
     publiés sur la page web personnelle » de Places disponibles ;
   - photo et présentation : onglet « Site - Annuaire », montrées seulement
@@ -444,13 +446,19 @@ def calculer(aujourdhui=None):
             age = _ages(pdl["age"], pdl["jusqu"])
         np, ac, maj = None, False, None
         if c in ("psychiatrie", "psychotherapie"):
+            # Médecins : non d'office, oui seulement si des places de psychothérapie sont ouvertes.
+            # Psychologues : selon Places disponibles, « à confirmer » si la ligne a vieilli.
             if pdl:
                 maj = (aujourdhui - pdl["maj"].date()).days if pdl["maj"] else None
-                if maj is None or maj > SITE["JOURS_FRAICHEUR"]:
+                if medecin:
+                    np = pdl["places"] > 0
+                elif maj is None or maj > SITE["JOURS_FRAICHEUR"]:
                     ac = True
                 else:
                     np = pdl["places"] > 0
             else:
+                if medecin:
+                    np = False
                 manques["sansPlacesDisponibles"].append(nom)
         conf = site.get(ini, {})
         valide = texte(conf.get("Validé par le collaborateur")).strip().lower() == "x"
@@ -531,7 +539,7 @@ def _completer_onglet(calc, aujourdhui):
 
 def _deposer(donnees):
     corps = json.dumps(donnees, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    media = MediaInMemoryUpload(corps, mimetype="application/json", resumable=False)
+    media = MediaInMemoryUpload(corps, mimetype="application/json; charset=utf-8", resumable=False)
     _api("storage", "v1").objects().insert(
         bucket=SITE["BUCKET"], name=SITE["OBJET"], media_body=media,
         body={"name": SITE["OBJET"], "contentType": "application/json; charset=utf-8",
