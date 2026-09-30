@@ -33,7 +33,8 @@ Tous les médecins en font partie, même sans place (décision d'Alberto du
 Ajout. La ligne s'insère à sa place alphabétique dans son bloc (médecins
 d'abord, affichés « Dr Nom Prénom », psychologues ensuite), toujours à
 l'intérieur du bloc de données pour que les plages bornées des totaux
-s'étendent. Contenu, dans cet ordre de priorité croissante : le profil
+s'étendent : jamais au-dessus de la première ligne de données, jamais
+sous la dernière. Contenu, dans cet ordre de priorité croissante : le profil
 repris de « Places disponibles - Archive » si la personne y figure (par
 position, jamais les lieux, jours, places ni dates), puis le Registre -
 Profil clinique (axes, âges, pathologies, compétences, par intitulé), puis
@@ -60,8 +61,8 @@ d'en-tête (miroir du nom, jours sans mise à jour, places total) ne sont
 jamais écrites.
 
 Outil : places_membres(confirmer). Pont : lieux_cycle avec le sujet
-« action:places_membres [confirmer] ». Sans confirmer, rien n'est écrit et
-le compte rendu dit ce qui serait fait.
+« action:places_membres [confirmer] [fond|etat] ». Sans confirmer, rien
+n'est écrit et le compte rendu dit ce qui serait fait.
 """
 
 import datetime
@@ -551,10 +552,26 @@ def _ajouter(fiche, aujourdhui, personnes, profils, candidats):
     else:
         index, permuter = p["ligneTotaux"] - 1, True
     largeur = p["largeur"]
+    # Première ligne de données : une ligne insérée AU-DESSUS du bloc
+    # décalerait le début des plages bornées ($CE$4 deviendrait $CE$5, et
+    # la matricielle de « Places total » se décalerait d'une ligne, ce qui
+    # est arrivé au premier passage du 30.09.2026). On insère donc sous la
+    # première ligne, on y descend ses valeurs, et la ligne neuve prend la
+    # première place.
+    haut = (index == PREMIERE_DONNEE and not permuter)
+    if haut:
+        index = PREMIERE_DONNEE + 1
     reqs = [{"insertDimension": {"range": {"sheetId": sid, "dimension": "ROWS", "startIndex": index - 1, "endIndex": index},
-                                 "inheritFromBefore": False}}]
-    reqs.extend(_requete_copie_format(sid, index + 1, index, largeur))
-    if permuter:
+                                 "inheritFromBefore": haut}}]
+    reqs.extend(_requete_copie_format(sid, index - 1 if haut else index + 1, index, largeur))
+    if haut:
+        premiere = p["grille"][PREMIERE_DONNEE - 1]
+        anciennes = {c: premiere[c - 1] for c in range(1, largeur + 1)
+                     if c not in p["debordement"] and c - 1 < len(premiere) and texte(premiere[c - 1]).strip() != ""}
+        reqs.extend(_requetes_valeurs(sid, index, anciennes, p["debordement"], largeur))
+        reqs.extend(_requetes_valeurs(sid, PREMIERE_DONNEE, valeurs, p["debordement"], largeur, effacer=True))
+        cible = PREMIERE_DONNEE
+    elif permuter:
         # la dernière ligne de données descend en index + 1 : elle remonte
         # en index, la ligne neuve prend sa place, plages bornées étendues.
         ancienne = p["grille"][index - 1]
