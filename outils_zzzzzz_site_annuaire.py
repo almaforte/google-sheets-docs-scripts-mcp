@@ -408,7 +408,7 @@ def calculer(aujourdhui=None):
         candidats.sort(key=lambda x: x[0])
         _, e, c, poste = candidats[0]
         conf = site.get(ini, {})
-        if pm._meme(conf.get("Publié sur le site"), "-"):
+        if texte(conf.get("Publié sur le site")).strip() == "-":
             ecartes.append({"initiales": ini, "raison": "retiré à la main (Publié sur le site = -)"})
             continue
         retenus.append((ini, pers, e, c, poste))
@@ -453,7 +453,7 @@ def calculer(aujourdhui=None):
             else:
                 manques["sansPlacesDisponibles"].append(nom)
         conf = site.get(ini, {})
-        valide = pm._meme(conf.get("Validé par le collaborateur"), "x")
+        valide = texte(conf.get("Validé par le collaborateur")).strip().lower() == "x"
         photo = texte(conf.get("Photo")).strip() if valide else ""
         bio = texte(conf.get("Présentation")).strip() if valide else ""
         if not valide:
