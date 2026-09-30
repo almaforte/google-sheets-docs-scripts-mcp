@@ -20,15 +20,24 @@ tenue dans le fichier Apps Script « 13f Menus des entites et des contrats de
 prestations » du projet d'onboarding. Les listes vivent dans Almaval - Listes,
 onglet Valeurs, et sont distribuees a l'onglet Listes de l'Effectif par la
 ligne 2 d'Abonnements.
+
+30.09.2026, decision d'Alberto : colonne « Devise » du registre des contrats
+(montant saisi dans sa monnaie reelle, conversion en francs au jour de chaque
+facture), et classeur a part pour les prestataires de la Direction generale,
+« Almaval - Direction generale - Prestataires », meme structure que les deux
+registres de l'Effectif, abonne aux listes par sa propre ligne d'Abonnements.
+Ses menus sont poses ici de la meme facon.
 """
 
 try:
     import outils_zzzzz_onboarding_4_validations as _validations
     from outils_zzzzz_onboarding_0_socle import ID_EFFECTIF as _ID_EFFECTIF
 
+    _ID_DIRECTION = "1yvqBfiwF1SXRVUtflQ1zD3ALeYr4OYb8Vm92lxCNtvM"
+    _ENTITES = "Registre - Entités"
     _CONTRATS = "Registre - Contrats de prestations"
     _AJOUTS = [
-        ("Registre - Entités", "Nature de la partie contractante", "Nature de la partie contractante"),
+        (_ENTITES, "Nature de la partie contractante", "Nature de la partie contractante"),
         (_CONTRATS, "Lieu d'exécution", "Lieu d'exécution"),
         (_CONTRATS, "Préavis de résiliation", "Préavis de résiliation"),
         (_CONTRATS, "Régime de TVA", "Régime de TVA"),
@@ -39,14 +48,32 @@ try:
         (_CONTRATS, "Livrables et droits d'auteur", "Coche"),
         (_CONTRATS, "Pièces justificatives reçues", "Coche"),
         (_CONTRATS, "Statut du contrat de prestation", "Statut du contrat de prestation"),
+        (_CONTRATS, "Devise", "Devise"),
     ]
-    _menus = _validations.MENUS_IMPOSES.setdefault(_ID_EFFECTIF, [])
-    _poses = 0
-    for _onglet, _colonne, _liste in _AJOUTS:
-        if any(m.get("onglet") == _onglet and m.get("colonne") == _colonne for m in _menus):
-            continue
-        _menus.append(_validations._m(_onglet, _colonne, _liste))
-        _poses += 1
-    print("[onboarding prestataires menus] menus imposes ajoutes : " + str(_poses), flush=True)
+    # Le classeur de la Direction generale n'a pas de menu Raison sociale : ses prestataires ne sont pas dans la liste de l'Effectif.
+    _AJOUTS_DIRECTION = [
+        (_ENTITES, "Membre du groupe", "Coche"),
+        (_CONTRATS, "Bénéficiaire", "Entité juridique"),
+        (_CONTRATS, "Objet", "Objet du contrat de prestations"),
+        (_CONTRATS, "Forme de la rémunération", "Rémunération du contrat de prestations"),
+        (_CONTRATS, "Périodicité", "Périodicité de la contrepartie"),
+    ] + _AJOUTS
+
+    def _poser(identifiant, ajouts):
+        menus = _validations.MENUS_IMPOSES.setdefault(identifiant, [])
+        poses = 0
+        for onglet, colonne, liste in ajouts:
+            if any(m.get("onglet") == onglet and m.get("colonne") == colonne for m in menus):
+                continue
+            menus.append(_validations._m(onglet, colonne, liste))
+            poses += 1
+        return poses
+
+    # Le passage de 6 h ne traite que les classeurs de VALIDATIONS_CLASSEURS : celui de la Direction generale y entre, avec son onglet Listes.
+    if not any(c.get("id") == _ID_DIRECTION for c in _validations.VALIDATIONS_CLASSEURS):
+        _validations.VALIDATIONS_CLASSEURS.append({"id": _ID_DIRECTION, "listes": "Listes"})
+    _poses = _poser(_ID_EFFECTIF, _AJOUTS)
+    _poses_direction = _poser(_ID_DIRECTION, _AJOUTS_DIRECTION)
+    print("[onboarding prestataires menus] menus imposes ajoutes : " + str(_poses) + " a l'Effectif, " + str(_poses_direction) + " a la Direction generale", flush=True)
 except Exception as _exc:  # noqa: BLE001
     print("[onboarding prestataires menus] non pose : " + type(_exc).__name__ + " " + str(_exc)[:200], flush=True)
