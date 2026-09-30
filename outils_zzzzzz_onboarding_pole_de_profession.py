@@ -30,7 +30,7 @@ et lire les professions une seule fois). Son nom le fait charger apres
 outils_zzzzz_onboarding_7_postes et apres l'enveloppe de l'intitule de l'EPT
 (bootstrap importe les modules par ordre alphabetique) ; le moteur appelle
 ces fonctions par leur nom de module a chaque passage, d'ou l'effet. Le
-projet Apps Script d'onboarding porte la meme regle, fichier « 74 Pole de
+projet Apps Script d'onboarding porte la meme regle, fichier « 78 Pole de
 profession dans les affectations ».
 """
 
