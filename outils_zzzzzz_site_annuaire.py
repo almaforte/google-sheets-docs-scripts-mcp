@@ -14,7 +14,8 @@ dépose chaque nuit. Aucune écriture quotidienne dans WordPress.
 
 Qui figure dans l'annuaire (règle d'Alberto du 30.09.2026). Une personne
 dont un engagement est en cours au Registre - Engagements (date de fin
-vide ou pas encore passée, donc retirée le lendemain du dernier jour),
+vide ou postérieure au jour du passage : retirée dès la nuit de son
+dernier jour, pour ne plus recevoir de demandes qu'elle ne pourra suivre),
 avec une affectation en cours au service Clinique ou au Service social du
 Registre - Affectations, et dont le statut de collaboration n'est ni
 locataire (jamais référencés nulle part) ni partenaire (encadrants et
@@ -32,11 +33,9 @@ Ce que dit chaque carte, et d'où cela vient :
   - axes et âge des patients : Registre - Profil clinique, à défaut
     Places disponibles ;
   - langues : Registre - Personnes et Places disponibles ;
-  - nouveaux patients (médecins et psychologues seulement) : médecins non
-    d'office, oui seulement si des places de psychothérapie sont ouvertes ;
-    psychologues oui si Places disponibles porte des places, non sinon,
-    « à confirmer » si la ligne n'a pas été mise à jour depuis plus de
-    30 jours ;
+  - nouveaux patients (médecins et psychologues seulement) : oui si
+    Places disponibles porte des places, non sinon ; « à confirmer » si la
+    ligne n'a pas été mise à jour depuis plus de 30 jours ;
   - boutons de rendez-vous : les liens d'agenda de la colonne « Plannings
     publiés sur la page web personnelle » de Places disponibles ;
   - photo et présentation : onglet « Site - Annuaire », montrées seulement
@@ -80,6 +79,7 @@ SITE = {
     "JOURS_DELAIS": 180,
     "MIN_MESURES": 3,
 }
+PLANCHER = 30  # en dessous, le dépôt public est refusé
 CATS = ["psychiatrie", "psychotherapie", "neuropsychologie", "infirmiers", "complementaires", "social"]
 JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
 VILLES = {"crissier": "Crissier", "morges": "Morges", "lausanne": "Lausanne", "lausanne riponne": "Lausanne",
@@ -125,7 +125,7 @@ def _actif(e, aujourdhui):
     if etat == "a venir" and not (debut and debut.date() <= aujourdhui):
         return False
     fin = date_de(e.get("Date de fin"))
-    return not (fin and fin.date() < aujourdhui)
+    return not (fin and fin.date() <= aujourdhui)
 
 
 def _exclu(e):
@@ -551,18 +551,24 @@ def passage_site(confirmer=False):
     aujourdhui = maintenant().date()
     with _verrou:
         calc = calculer(aujourdhui)
-        ajouts, octets = [], 0
+        ajouts, octets, refus = [], 0, ""
         if confirmer:
             ajouts = _completer_onglet(calc, aujourdhui)
             if ajouts:
                 calc = calculer(aujourdhui)
-            octets = _deposer(calc["donnees"])
+            nombre = len(calc["donnees"]["specialistes"])
+            if nombre < PLANCHER:
+                # Garde-fou : une lecture partielle des registres ne doit jamais vider le site.
+                refus = "dépôt refusé : " + str(nombre) + " spécialistes, plancher " + str(PLANCHER) + " ; le fichier de la veille reste en ligne"
+            else:
+                octets = _deposer(calc["donnees"])
     d = calc["donnees"]
     par_cat = {}
     for r in d["specialistes"]:
         par_cat.setdefault(r["c"], []).append(r["n"])
     return {
         "moteur": "site_annuaire", "confirme": bool(confirmer), "url": SITE["URL"], "octets": octets,
+        "refus": refus,
         "specialistes": len(d["specialistes"]), "parCategorie": {k: len(v) for k, v in par_cat.items()},
         "noms": par_cat, "disponibilites": d["disponibilites"], "delais": calc["delais"],
         "nouveauxPatientsOui": [r["n"] for r in d["specialistes"] if r["np"] is True],
