@@ -179,6 +179,9 @@ def raccourcis_creer_en_lot(raccourcis: list, sujet: str = ""):
     Plafond de 50 éléments par appel.
     sujet attend une ADRESSE de messagerie (vide pour l'identité du serveur).
     """
+    if not isinstance(raccourcis, list):
+        return {"refuse": True, "raison": "raccourcis doit être une liste de dictionnaires."}
+
     if len(raccourcis) > 50:
         return {"refuse": True, "raison": "Plafond de 50 éléments dépassé."}
 
@@ -187,6 +190,12 @@ def raccourcis_creer_en_lot(raccourcis: list, sujet: str = ""):
     stats = {"total": len(raccourcis), "crees": 0, "inchanges": 0, "refuses": 0, "erreurs": 0, "non_verifies": 0}
 
     for i, req in enumerate(raccourcis, start=1):
+        if not isinstance(req, dict):
+            res = {"refuse": True, "raison": "Élément non valide : un dictionnaire est attendu.", "rang": i}
+            stats["refuses"] += 1
+            resultats.append(res)
+            continue
+
         cible_id = req.get("cible_id")
         dossier_id = req.get("dossier_id")
         nom = req.get("nom", "")
@@ -230,11 +239,16 @@ def raccourcis_lister(dossier_id: str, recursif: bool = False, verifier_cibles: 
     dossiers_a_explorer = [(dossier_id, 1)]
     tronque = False
     cibles_a_verifier = []
+    erreurs_lecture = []
 
     while dossiers_a_explorer and not tronque:
         dossier_courant, profondeur = dossiers_a_explorer.pop(0)
         
-        query = f"'{dossier_courant}' in parents and trashed = false"
+        if recursif:
+            query = f"'{dossier_courant}' in parents and trashed = false and (mimeType = 'application/vnd.google-apps.shortcut' or mimeType = 'application/vnd.google-apps.folder')"
+        else:
+            query = f"'{dossier_courant}' in parents and trashed = false and mimeType = 'application/vnd.google-apps.shortcut'"
+            
         page_token = None
 
         while True:
@@ -248,7 +262,8 @@ def raccourcis_lister(dossier_id: str, recursif: bool = False, verifier_cibles: 
                     pageToken=page_token,
                     fields="nextPageToken, files(id, name, mimeType, shortcutDetails, webViewLink)"
                 ).execute()
-            except Exception:
+            except Exception as e:
+                erreurs_lecture.append(f"Dossier {dossier_courant} illisible : {str(e)[:200]}")
                 break
 
             for f in reponse.get("files", []):
@@ -295,11 +310,26 @@ def raccourcis_lister(dossier_id: str, recursif: bool = False, verifier_cibles: 
                 raccourcis_trouves[index]["cible_accessible"] = False
                 raccourcis_trouves[index]["cible_erreur"] = str(e)[:100]
                 casses += 1
+                
+        cibles_non_verifiees = 0
+        for raccourci in raccourcis_trouves:
+            if "cible_accessible" not in raccourci:
+                raccourci["cible_accessible"] = None
+                cibles_non_verifiees += 1
 
-    return {
+    complet = (not erreurs_lecture) and (not tronque)
+    
+    reponse_finale = {
         "dossier_id": dossier_id,
         "nombre": len(raccourcis_trouves),
         "cassés": casses,
         "tronque": tronque,
+        "erreurs_lecture": erreurs_lecture,
+        "complet": complet,
         "raccourcis": raccourcis_trouves
     }
+    
+    if verifier_cibles:
+        reponse_finale["cibles_non_verifiees"] = cibles_non_verifiees
+        
+    return reponse_finale
