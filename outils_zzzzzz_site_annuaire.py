@@ -95,7 +95,8 @@ CODES = {"F": "Français", "I": "Italien", "EN": "Anglais", "ES": "Espagnol", "P
 AXES = {"TCC": "Cognitivo-comportementale (TCC)", "ACP": "Centrée sur la personne (ACP)",
         "PCI": "Corporelle intégrative (PCI)", "TCE": "Centrée sur les émotions (TCE)"}
 SPECIAUX = {
-    # Le registre porte la direction pour cet engagement ; la fiche clinique suit le Document maître Formation.
+    # Le registre porte la direction pour cet engagement (mandat, statut Partner depuis le 01.10.2026) ;
+    # la fiche clinique suit le Document maître Formation.
     "AMFo": {"c": "psychiatrie", "t": "Médecin psychiatre psychothérapeute, directeur médical",
              "s": ["Crissier", "Morges"], "j": ["lundi", "mardi", "mercredi", "jeudi", "vendredi"], "o": True},
 }
@@ -409,7 +410,8 @@ def calculer(aujourdhui=None):
             continue
         candidats = []
         for e in liste:
-            if not _actif(e, aujourdhui) or _exclu(e):
+            # Les cas particuliers (direction médicale) restent publiés quel que soit le statut du mandat.
+            if not _actif(e, aujourdhui) or (_exclu(e) and ini not in SPECIAUX):
                 continue
             affs = affectations.get(texte(e.get("Clé engagement")).strip(), [])
             if not affs and ini not in SPECIAUX:
