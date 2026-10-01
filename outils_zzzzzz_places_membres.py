@@ -25,7 +25,12 @@ Qui a sa ligne. Une personne du Registre - Engagements dont un engagement :
   - n'a pas un statut de collaboration de MEMBRES["STATUTS_EXCLUS"]
     (locataires, jamais référencés nulle part ; partenaires, encadrants et
     superviseurs qui ne suivent pas de patients) ;
-  - a une affectation au service Clinique dans le Registre - Affectations.
+  - a une affectation au service Clinique dans le Registre - Affectations ;
+  - s'il est « En cours », porte au moins une demi-journée de présence
+    (lieu, Télétravail ou Itinérant) : une personne en cours sans aucune
+    demi-journée ne vient pas encore (Capozoli Biancarelli, décision
+    d'Alberto du 01.10.2026). Un engagement « À venir » garde sa ligne de
+    préparation même sans demi-journée.
 Tous les médecins en font partie, même sans place (décision d'Alberto du
 30.09.2026, qui remplace pour eux le critère du suivi long terme du
 14.09.2026).
@@ -33,8 +38,7 @@ Tous les médecins en font partie, même sans place (décision d'Alberto du
 Ajout. La ligne s'insère à sa place alphabétique dans son bloc (médecins
 d'abord, affichés « Dr Nom Prénom », psychologues ensuite), toujours à
 l'intérieur du bloc de données pour que les plages bornées des totaux
-s'étendent : jamais au-dessus de la première ligne de données, jamais
-sous la dernière. Contenu, dans cet ordre de priorité croissante : le profil
+s'étendent. Contenu, dans cet ordre de priorité croissante : le profil
 repris de « Places disponibles - Archive » si la personne y figure (par
 position, jamais les lieux, jours, places ni dates), puis le Registre -
 Profil clinique (axes, âges, pathologies, compétences, par intitulé), puis
@@ -48,7 +52,10 @@ Archivage. Une ligne dont la personne n'a plus aucun engagement actif
 (tous clos, ou date de fin dépassée) est recopiée par position dans
 l'archive, avec « Fin de l'engagement », « Archivé le » et « Motif de
 l'archivage », relue, puis retirée de l'onglet vivant. Une personne active
-mais locataire ou partenaire est archivée avec ce motif. Une ligne sans
+mais locataire ou partenaire est archivée avec ce motif, de même qu'une
+personne en cours sans aucune demi-journée (motif « Aucune demi-journée au
+registre ») : elle revient d'elle-même, profil repris de l'archive, dès que
+ses demi-journées sont saisies. Une ligne sans
 correspondance sûre au registre, ou ambiguë, n'est JAMAIS touchée : elle
 est signalée dans le compte rendu.
 
@@ -61,8 +68,8 @@ d'en-tête (miroir du nom, jours sans mise à jour, places total) ne sont
 jamais écrites.
 
 Outil : places_membres(confirmer). Pont : lieux_cycle avec le sujet
-« action:places_membres [confirmer] [fond|etat] ». Sans confirmer, rien
-n'est écrit et le compte rendu dit ce qui serait fait.
+« action:places_membres [confirmer] ». Sans confirmer, rien n'est écrit et
+le compte rendu dit ce qui serait fait.
 """
 
 import datetime
@@ -103,6 +110,7 @@ MEMBRES = {
 }
 
 _MARQUES = re.compile("[̀-ͯ]")
+SANS_PRESENCE = "aucune demi-journée au registre"
 
 
 # ------------------------------------------------------------------ noms
@@ -196,6 +204,16 @@ def _statut_exclu(e):
     return None
 
 
+def _presente(e):
+    """Vrai si l'engagement porte au moins une demi-journée de présence (lieu, Télétravail ou Itinérant)."""
+    for jour in MEMBRES["JOURS"]:
+        for moment in ("matin", "après-midi"):
+            brut = _norm(e.get(jour + " " + moment))
+            if brut and brut != "non travaille":
+                return True
+    return False
+
+
 def _profession_ok(e):
     return any(_meme(e.get("Profession"), p) for p in MEMBRES["PROFESSIONS"])
 
@@ -218,6 +236,8 @@ def _candidat(e, aujourdhui, cliniques):
         return motif
     if texte(e.get("Clé engagement")).strip() not in cliniques:
         return "sans affectation au service Clinique"
+    if etat == "en cours" and not _presente(e):
+        return SANS_PRESENCE
     return None
 
 
@@ -471,6 +491,10 @@ def calculer(aujourdhui=None):
         motifs = [_statut_exclu(e) for e in actifs if _statut_exclu(e)]
         if motifs and all(_statut_exclu(e) for e in actifs):
             a_archiver.append({"ligne": l["numero"], "nom": l["nom"], "initiales": ini, "fin": "", "motif": motifs[0]})
+            continue
+        if {_candidat(e, aujourdhui, cliniques) for e in actifs} == {SANS_PRESENCE}:
+            a_archiver.append({"ligne": l["numero"], "nom": l["nom"], "initiales": ini, "fin": "",
+                               "motif": "Aucune demi-journée au registre"})
             continue
         hors_critere.append({"ligne": l["numero"], "nom": l["nom"], "initiales": ini,
                              "raisons": sorted(set(_candidat(e, aujourdhui, cliniques) or "" for e in actifs))})
