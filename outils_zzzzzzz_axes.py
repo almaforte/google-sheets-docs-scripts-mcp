@@ -5,11 +5,15 @@ ensuite la référence est le Registre - Profil clinique, et Places disponibles 
 la valeur « Clinique » vaut « Intégrative ». Le module comble les trous et les équivalences,
 sans jamais écraser une valeur différente : un vrai conflit est seulement signalé.
 
-Règles :
-4. Les données d'un classeur se référencent par nom de colonne lu dans la ligne d'en-tête, jamais par lettre de colonne en dur.
-5. Les intitulés créés sont en français accentué, sans tiret long.
-6. Après toute écriture, relecture de la plage écrite pour preuve.
-7. Le rapport final est en français, en prose courte et précise.
+Règles, dans cet ordre, pour chacun des trois champs Axe thérapie 1, Axe thérapie 2, Axe thérapie complémentaire :
+e1. une valeur « Clinique » du profil ou de Places disponibles devient « Intégrative » ;
+e2. profil vide et saisie d'onboarding remplie (Axe thérapie 1 seulement) : le profil prend la saisie ;
+e3. profil vide et Places disponibles remplie : le profil prend Places disponibles ;
+e4. Places disponibles vide et profil rempli : Places disponibles prend le profil ;
+e5. profil et Places disponibles remplis et différents : aucune écriture, conflit signalé ;
+e6. Axe thérapie 1 du profil différent de la saisie : aucune écriture, écart signalé ;
+e7. personne de Places disponibles sans ligne au profil : signalée, aucune ligne créée.
+Une écriture ne remplace jamais qu'une cellule vide ou une valeur « Clinique » ; une cellule « - » n'est jamais écrite. Au plus 25 écritures par passage.
 
 Outil : axes_controle(confirmer). Pont : lieux_cycle avec le sujet « action:axes [confirmer] ».
 """
@@ -117,7 +121,7 @@ def calculer():
             canon_saisie = _canon(val_saisie)
             
             # e2. Profil vide, saisie remplie
-            if ligne_profil and not canon_profil and canon_saisie and champ == "Axe thérapie 1":
+            if ligne_profil and not texte(val_profil).strip() and canon_saisie and champ == "Axe thérapie 1":
                 ecritures.append({
                     "onglet": AXES["ONGLET_PROFIL"], "initiales": ini, "champ": champ,
                     "ligne": ligne_profil["_ligne"], "colonne": None,
@@ -127,7 +131,7 @@ def calculer():
                 canon_profil = canon_saisie
                 
             # e3. Profil vide, Places rempli
-            elif ligne_profil and not canon_profil and canon_places:
+            elif ligne_profil and not texte(val_profil).strip() and canon_places:
                 ecritures.append({
                     "onglet": AXES["ONGLET_PROFIL"], "initiales": ini, "champ": champ,
                     "ligne": ligne_profil["_ligne"], "colonne": None,
@@ -137,7 +141,7 @@ def calculer():
                 canon_profil = canon_places
                 
             # e4. Places vide, profil rempli
-            if ligne_places and col_places and col_places not in p["debordement"] and not canon_places and canon_profil:
+            if ligne_places and col_places and col_places not in p["debordement"] and not texte(val_places).strip() and canon_profil:
                 ecritures.append({
                     "onglet": "Places disponibles", "initiales": ini, "champ": champ,
                     "ligne": ligne_places["numero"], "colonne": col_places,
