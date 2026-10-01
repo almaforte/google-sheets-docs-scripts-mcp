@@ -172,12 +172,15 @@ def _femme(pers):
     return _n(pers.get("Sexe")).startswith("f")
 
 
-def _titre(c, e, pers, poste):
+def _titre(c, e, pers, poste, axe1=""):
     titre = _n(pers.get("Titre obtenu"))
     formation = _n(e.get("Statut")) == "en formation"
     if c == "psychiatrie":
         return "Médecin psychiatre en formation" if formation else "Médecin psychiatre psychothérapeute"
     if c == "psychotherapie":
+        if _n(axe1).startswith("integrati"):
+            return ("Psychologue en formation de psychologie clinique" if formation
+                    else "Psychologue spécialiste en psychologie clinique")
         if "psychotherapie" in titre:
             return "Psychologue psychothérapeute"
         if "psychologie clinique" in titre:
@@ -411,7 +414,7 @@ def calculer(aujourdhui=None):
             sans_personne.append(l["nom"])
 
     prop, entetes, site, nb_lignes = _onglet_site()
-    retenus, ecartes = [], []
+    retenus, ecartes = []
     for ini, liste in par_personne.items():
         pers = personnes.get(ini)
         if not pers:
@@ -467,6 +470,7 @@ def calculer(aujourdhui=None):
         prof = profils.get(ini, {})
         axes = [texte(prof.get(k)).strip() for k in ("Axe thérapie 1", "Axe thérapie 2", "Axe thérapie complémentaire")]
         axes = [a for a in axes if a and a not in ("-", "x")] or (pdl["axes"] if pdl else [])
+        axe1 = axes[0] if axes else ""
         axes = list(dict.fromkeys(AXES.get(a, a) for a in axes))
         age = _ages(prof.get("Âge patients dès"), prof.get("Jusqu'à")) if prof else ""
         if not age and pdl:
@@ -507,7 +511,7 @@ def calculer(aujourdhui=None):
         fiche = texte(conf.get("Fiche actuelle")).strip()
         slug = _slug(nom)
         lignes.append({
-            "n": nom, "c": c, "t": special.get("t") or _titre(c, e, pers, poste), "s": sites, "j": jours,
+            "n": nom, "c": c, "t": special.get("t") or _titre(c, e, pers, poste, axe1), "s": sites, "j": jours,
             "o": bool(en_ligne), "l": langues,
             "u": (SITE["FICHE_BASE"] + "?s=" + slug) if SITE["FICHE_BASE"] else fiche,
             "p": photo, "i": "".join(x[0] for x in pm.jetons(nom)[:1] + pm.jetons(nom)[-1:]).upper(),
