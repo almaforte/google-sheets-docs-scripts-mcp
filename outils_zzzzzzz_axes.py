@@ -12,7 +12,7 @@ e3. profil vide et Places disponibles remplie : le profil prend Places disponibl
 e4. Places disponibles vide et profil rempli : Places disponibles prend le profil ;
 e5. profil et Places disponibles remplis et différents : aucune écriture, conflit signalé ;
 e6. Axe thérapie 1 du profil différent de la saisie : aucune écriture, écart signalé ;
-e7. personne de Places disponibles sans ligne au profil : signalée, aucune ligne créée.
+e7. personne de Places disponibles sans ligne au profil : sa ligne est créée, reprise de Places disponibles par intitulé, Axe thérapie 1 depuis la saisie s'il manque, au plus 10 par passage.
 Une écriture ne remplace jamais qu'une cellule vide ou une valeur « Clinique » ; une cellule « - » n'est jamais écrite. Au plus 25 écritures par passage.
 
 Outil : axes_controle(confirmer). Pont : lieux_cycle avec le sujet « action:axes [confirmer] ».
@@ -31,6 +31,8 @@ AXES = {
     "ONGLET_PROFIL": "Registre - Profil clinique",
     "ONGLET_SAISIE": "Saisie - Collaborateurs",
     "PLAFOND_ECRITURES": 25,
+    "PLAFOND_PROFILS": 10,
+    "SOURCE_PROFIL": "Places disponibles (Almaval - Patients)",
 }
 
 def _canon(v):
@@ -44,6 +46,118 @@ def _canon(v):
 
 def _meme_axe(a, b):
     return pm._norm(_canon(a)) == pm._norm(_canon(b))
+
+def _creer_profils(calc, aujourdhui, confirmer):
+    onglet = socle.lire_onglet_de(ID_EFFECTIF, AXES["ONGLET_PROFIL"], rafraichir=True, avec_calculees=False)
+    entetes = onglet.entetes
+    nb_lignes = len(onglet.grille)
+    prop = onglet.prop
+    
+    p = calc["p"]
+    saisie = calc["saisie"]
+    personnes = calc["personnes"]
+    
+    profils_a_creer = []
+    rangees = []
+    
+    a_traiter = calc["sansProfil"][:AXES["PLAFOND_PROFILS"]]
+    
+    for sp in a_traiter:
+        ini = sp["initiales"]
+        ligne_places_num = sp["lignePlaces"]
+        
+        ligne_places = next((l for l in p["lignes"] if l["numero"] == ligne_places_num), None)
+        if not ligne_places:
+            continue
+            
+        rangee = [""] * len(entetes)
+        colonnes_remplies = 0
+        
+        for i, T in enumerate(entetes):
+            if not T:
+                continue
+            
+            val = ""
+            if T == "Initiales":
+                val = ini
+            elif T == "Nom prénom":
+                pers = personnes.get(ini)
+                if pers and texte(pers.get("Nom prénom")):
+                    val = texte(pers.get("Nom prénom"))
+                else:
+                    val = ligne_places["nom"]
+            elif T == "Source":
+                val = AXES["SOURCE_PROFIL"]
+            elif T == "Repris le":
+                val = aujourdhui.strftime("%Y-%m-%d")
+            elif T == "Mis à jour dans Places disponibles le":
+                c_maj = p["colonne"]("Mis à jour le")
+                if c_maj and c_maj not in p["debordement"]:
+                    val = ligne_places["valeurs"][c_maj - 1] if c_maj - 1 < len(ligne_places["valeurs"]) else ""
+            else:
+                cible = {"Âge patients dès": "Âge patients"}.get(T, T)
+                c = p["colonne"](cible, visible=True) or p["colonne"](cible)
+                if c and c not in p["debordement"]:
+                    val = ligne_places["valeurs"][c - 1] if c - 1 < len(ligne_places["valeurs"]) else ""
+                    
+            if val:
+                rangee[i] = val
+                colonnes_remplies += 1
+                
+        idx_axe1 = entetes.index("Axe thérapie 1") if "Axe thérapie 1" in entetes else -1
+        if idx_axe1 >= 0 and not rangee[idx_axe1]:
+            s = saisie.get(ini, {})
+            val_saisie = s.get("Axe thérapie", "")
+            if val_saisie:
+                rangee[idx_axe1] = _canon(val_saisie)
+                colonnes_remplies += 1
+                
+        for champ in ["Axe thérapie 1", "Axe thérapie 2", "Axe thérapie complémentaire"]:
+            if champ in entetes:
+                idx = entetes.index(champ)
+                if rangee[idx]:
+                    rangee[idx] = _canon(rangee[idx])
+                    
+        profils_a_creer.append({
+            "initiales": ini,
+            "lignePlaces": ligne_places_num,
+            "colonnesRemplies": colonnes_remplies,
+            "_rangee": rangee
+        })
+        rangees.append(rangee)
+        
+    if not confirmer:
+        for p_creer in profils_a_creer:
+            p_creer.pop("_rangee", None)
+        return profils_a_creer
+        
+    if not rangees:
+        return []
+        
+    debut = nb_lignes + 1
+    socle._assurer_dimensions(ID_EFFECTIF, prop, lignes=debut + len(rangees) - 1)
+    socle._batch(ID_EFFECTIF, socle._requete_cellules(prop["sheetId"], debut - 1, 0, rangees))
+    socle._oublier(ID_EFFECTIF, prop["title"])
+    
+    onglet_relu = socle.lire_onglet_de(ID_EFFECTIF, AXES["ONGLET_PROFIL"], rafraichir=True, avec_calculees=False)
+    
+    profils_crees = []
+    for i, p_creer in enumerate(profils_a_creer):
+        ligne_ecrite = debut + i
+        relu = False
+        for l in onglet_relu.lignes:
+            if l["_ligne"] == ligne_ecrite:
+                if texte(l.get("Initiales")).strip() == p_creer["initiales"]:
+                    relu = True
+                break
+        profils_crees.append({
+            "initiales": p_creer["initiales"],
+            "ligne": ligne_ecrite,
+            "relu": relu,
+            "colonnesRemplies": p_creer["colonnesRemplies"]
+        })
+        
+    return profils_crees
 
 def calculer():
     personnes, engagements, cliniques, profils = pm._registres()
@@ -166,7 +280,7 @@ def calculer():
         "ecritures": ecritures, "conflits": conflits, "ecartsSaisie": ecarts_saisie,
         "sansProfil": sans_profil, "sansCorrespondance": sans_correspondance,
         "doublonsSaisie": doublons_saisie, "personnesVues": len(personnes_vues),
-        "p": p, "profils": profils
+        "p": p, "profils": profils, "saisie": saisie, "personnes": personnes
     }
 
 def passage_axes(confirmer=False):
@@ -236,10 +350,19 @@ def passage_axes(confirmer=False):
                 e["conforme"] = _meme_axe(relu, e["apres"])
                 faits.append(e)
                 
+        try:
+            res_profils = _creer_profils(calc, maintenant().date(), confirmer)
+            if confirmer:
+                profils_crees = res_profils
+            else:
+                profils_a_creer = res_profils
+        except Exception as exc:
+            erreur_profils = str(exc)
+                
         lien_places = "https://docs.google.com/spreadsheets/d/" + pm.ID_PLACES + "/edit#gid=" + str(p["prop"]["sheetId"])
         lien_profil = "https://docs.google.com/spreadsheets/d/" + ID_EFFECTIF + "/edit#gid=" + str(onglet_profil.sheet_id)
         
-        return {
+        ret = {
             "moteur": "axes",
             "confirme": bool(confirmer),
             "personnesVues": calc["personnesVues"],
@@ -255,6 +378,15 @@ def passage_axes(confirmer=False):
                 "profil": lien_profil
             }
         }
+        
+        if "erreur_profils" in locals():
+            ret["erreurProfils"] = erreur_profils
+        elif confirmer:
+            ret["profilsCrees"] = profils_crees
+        else:
+            ret["profilsACreer"] = profils_a_creer
+            
+        return ret
 
 @mcp.tool()
 @tolerant
