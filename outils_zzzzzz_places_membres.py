@@ -21,7 +21,8 @@ Qui a sa ligne. Une personne du Registre - Engagements dont un engagement :
   - n'a pas de date de fin, ou une date de fin égale ou postérieure à
     aujourd'hui ;
   - porte une profession de MEMBRES["PROFESSIONS"] (médecins et
-    psychologues : psychothérapie et évaluations) ;
+    psychologues : psychothérapie et évaluations ; infirmiers depuis la
+    décision d'Alberto du 01.10.2026, statut d'accueil au lieu de places) ;
   - n'a pas un statut de collaboration de MEMBRES["STATUTS_EXCLUS"]
     (locataires, jamais référencés nulle part ; partenaires, encadrants et
     superviseurs qui ne suivent pas de patients) ;
@@ -89,7 +90,7 @@ LIGNE_TECHNIQUE = CFG["LIGNE_TECHNIQUE_PLACES"]
 PREMIERE_DONNEE = LIGNE_TECHNIQUE + 2
 
 MEMBRES = {
-    "PROFESSIONS": ["Médecin psychiatre", "Médecin pédopsychiatre", "Médecin", "Psychologue"],
+    "PROFESSIONS": ["Médecin psychiatre", "Médecin pédopsychiatre", "Médecin", "Psychologue", "Infirmier"],
     "STATUTS_EXCLUS": {"locataire": "Locataire, jamais référencé", "partner": "Partenaire, sans suivi de patients"},
     "JOURS_AVANT_ARRIVEE": 45,
     "PLAFOND_AJOUTS": 8,
@@ -423,9 +424,16 @@ def _valeurs_nouvelle_ligne(p, pers, e, profil, reprise, medecin, aujourdhui):
         if ancien and _cle(ancien) == _cle(affichage):
             affichage = ancien
     poser("Thérapeute", affichage)
-    poser("Discipline", "Médecin" if medecin else "Psychologue")
+    # Soins infirmiers (décision d'Alberto du 01.10.2026) : les infirmiers ont leur ligne, discipline
+    # « Infirmier », statut « Ouvert » à l'arrivée, sans classe de formation.
+    infirmier = _norm(e.get("Profession")).startswith("infirmier")
+    poser("Discipline", "Médecin" if medecin else ("Infirmier" if infirmier else "Psychologue"))
+    if infirmier:
+        poser("Statut infirmier", "Ouvert")
     classe = texte(pers.get("Classe de formation")).strip()
-    if classe:
+    if infirmier:
+        pass
+    elif classe:
         poser("Titré", classe)
     elif texte(pers.get("Titre obtenu")).strip():
         poser("Titré", "T")
