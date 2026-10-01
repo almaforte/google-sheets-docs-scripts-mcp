@@ -1,16 +1,16 @@
-"""Almaval - onboarding : lignes de rémunération posées après chaque report de mutation, 30.09.2026.
+"""Almaval - onboarding : lignes de remuneration posees apres chaque report de mutation, 30.09.2026.
 
-Décision d'Alberto du 30.09.2026 : la rémunération est désormais composite.
-Les sept colonnes résumé de « Registre - Engagements » sont calculées depuis
-l'onglet « Registre - Rémunérations » (une ligne par composante et par version).
+Decision d'Alberto du 30.09.2026 : la remuneration est desormais composite.
+Les sept colonnes resume de « Registre - Engagements » sont calculees depuis
+l'onglet « Registre - Remunerations » (une ligne par composante et par version).
 Le moteur nocturne des mutations reporte les mutations au registre par ecr.objet,
-qui saute les colonnes calculées : une hausse de salaire est donc marquée
-« Appliquée » sans rien changer au registre des engagements.
+qui saute les colonnes calculees : une hausse de salaire est donc marquee
+« Appliquee » sans rien changer au registre des engagements.
 
 Ce module d'extension intercepte le report d'une mutation, lit les valeurs
-de rémunération, et pose ou clôt les lignes correspondantes dans
-« Registre - Rémunérations » selon les règles de la spécification.
-Il ne réécrit pas le moteur : il remplace sa fonction _appliquer_ligne_de_mutation_61
+de remuneration, et pose ou clot les lignes correspondantes dans
+« Registre - Remunerations » selon les regles de la specification.
+Il ne reecrit pas le moteur : il remplace sa fonction _appliquer_ligne_de_mutation_61
 au chargement.
 """
 
@@ -64,11 +64,30 @@ try:
         v_clean = v_clean.replace("%", "")
         try:
             n = float(v_clean)
-            if a_pourcent or (est_fraction and n > 1):
+            if a_pourcent or (est_fraction and abs(n) > 1):
                 n = n / 100
             return n
         except ValueError:
             return None
+
+    def _entier(v):
+        if v is None or str(v).strip() == "":
+            return None
+        try:
+            return int(float(str(v).strip().replace(",", ".")))
+        except ValueError:
+            return None
+
+    def _texte_nombre(v):
+        if v is None or str(v).strip() == "":
+            return ""
+        try:
+            f = float(str(v).strip().replace(",", "."))
+            if f.is_integer():
+                return str(int(f))
+            return str(f)
+        except ValueError:
+            return str(v)
 
     def valeurs_de_la_mutation(ligne_mut):
         valeurs = {}
@@ -206,8 +225,14 @@ try:
         if "Salaire mensuel effectif" in valeurs:
             total = valeurs["Salaire mensuel effectif"]
             valeurs["Salaire mensuel effectif"] = total - admin_a_utiliser
+            if valeurs["Salaire mensuel effectif"] < 0:
+                del valeurs["Salaire mensuel effectif"]
+                bilan["anomalies"].append(f"Salaire mensuel effectif négatif après déduction de la part admin : {total} moins {admin_a_utiliser}")
         elif "Dont salaire admin mensuel versé" in valeurs:
             valeurs["Salaire mensuel effectif"] = (valeur_therapies_vigueur + valeur_admin_vigueur) - admin_a_utiliser
+            if valeurs["Salaire mensuel effectif"] < 0:
+                del valeurs["Salaire mensuel effectif"]
+                bilan["anomalies"].append(f"Salaire mensuel effectif négatif après déduction de la part admin : {(valeur_therapies_vigueur + valeur_admin_vigueur)} moins {admin_a_utiliser}")
             
         if "Factoring" in valeurs and valeurs["Factoring"] == "x":
             taux_factoring = 0.02
@@ -221,12 +246,14 @@ try:
             valeurs["Factoring"] = taux_factoring
             
         lignes_a_creer = []
+        ecritures_existantes = []
+        lignes_closes = set()
         max_no_ligne = 0
         for l in remunerations.lignes:
             if str(l.get("Clé engagement") or "").strip() == cle_eng:
-                no = _m6._parse_float(str(l.get("N° de ligne") or ""))
+                no = _entier(l.get("N° de ligne"))
                 if no is not None and no > max_no_ligne:
-                    max_no_ligne = int(no)
+                    max_no_ligne = no
                     
         for comp in ordre_composantes:
             if comp not in valeurs:
@@ -242,6 +269,20 @@ try:
             bilan["composantes"].append(comp)
             sig = SIGNATURES[comp]
             
+            if comp == "Factoring":
+                ligne_factoring_creee = next((nl for nl in lignes_a_creer if str(nl.get("Type de ligne") or "").strip().lower() == "ajustement" and str(nl.get("Ajustement") or "").strip().lower() == "factoring"), None)
+                if ligne_factoring_creee:
+                    if v == 0:
+                        lignes_a_creer.remove(ligne_factoring_creee)
+                        bilan["creees"] -= 1
+                    else:
+                        val_actuelle = ligne_factoring_creee.get("Valeur")
+                        if val_actuelle is None or abs(val_actuelle - v) >= 0.0005:
+                            ligne_factoring_creee["Valeur"] = v
+                            notes = str(ligne_factoring_creee.get("Notes") or "")
+                            ligne_factoring_creee["Notes"] = notes + f", valeur portée à {_texte_nombre(v)} par la mutation {cle_mut}"
+                    continue
+            
             # regle C1
             candidates = []
             for l in remunerations.lignes:
@@ -256,10 +297,12 @@ try:
             # regle C2
             if v == 0:
                 for l in en_vigueur:
-                    ecr.cellule(remunerations, l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1)))
-                    notes = str(l.get("Notes") or "")
-                    ecr.cellule(remunerations, l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}")
-                    bilan["closes"] += 1
+                    if l["_ligne"] not in lignes_closes:
+                        ecritures_existantes.append((l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1))))
+                        notes = str(l.get("Notes") or "")
+                        ecritures_existantes.append((l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}"))
+                        lignes_closes.add(l["_ligne"])
+                        bilan["closes"] += 1
                 continue
                 
             if comp == "Factoring":
@@ -280,7 +323,7 @@ try:
             for l in candidates:
                 d_debut = _m6._date_ou_nulle(l.get("Date de début"))
                 if d_debut and datetime.datetime(d_debut.year, d_debut.month, d_debut.day) > d_effet:
-                    ecr.cellule(remunerations, l["_ligne"], "Anomalie", f"Ligne future en conflit avec la mutation {cle_mut} du {d_effet.strftime('%d.%m.%Y')}")
+                    ecritures_existantes.append((l["_ligne"], "Anomalie", f"Ligne future en conflit avec la mutation {cle_mut} du {d_effet.strftime('%d.%m.%Y')}"))
                     bilan["anomalies"].append(f"Ligne future en conflit avec la mutation {cle_mut} du {d_effet.strftime('%d.%m.%Y')}")
                     conflit_futur = True
             if conflit_futur:
@@ -292,9 +335,9 @@ try:
                 d_debut = _m6._date_ou_nulle(l.get("Date de début"))
                 if d_debut and datetime.datetime(d_debut.year, d_debut.month, d_debut.day) == d_effet:
                     ancienne = str(l.get("Valeur") or "")
-                    ecr.cellule(remunerations, l["_ligne"], "Valeur", v)
+                    ecritures_existantes.append((l["_ligne"], "Valeur", v))
                     notes = str(l.get("Notes") or "")
-                    ecr.cellule(remunerations, l["_ligne"], "Notes", notes + f" | Valeur corrigée de {ancienne} à {v} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}")
+                    ecritures_existantes.append((l["_ligne"], "Notes", notes + f" | Valeur corrigée de {_texte_nombre(ancienne)} à {_texte_nombre(v)} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}"))
                     bilan["corrigees"] += 1
                     corrige_sur_place = True
             if corrige_sur_place:
@@ -305,12 +348,14 @@ try:
             anciens_numeros = []
             for l in en_vigueur:
                 ancienne = str(l.get("Valeur") or "")
-                ancien_no = str(l.get("N° de ligne") or "")
+                ancien_no = _entier(l.get("N° de ligne"))
                 anciens_numeros.append(ancien_no)
-                ecr.cellule(remunerations, l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1)))
-                notes = str(l.get("Notes") or "")
-                ecr.cellule(remunerations, l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}, remplacée par la ligne {nouveau_no_base} à {v}")
-                bilan["closes"] += 1
+                if l["_ligne"] not in lignes_closes:
+                    ecritures_existantes.append((l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1))))
+                    notes = str(l.get("Notes") or "")
+                    ecritures_existantes.append((l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}, remplacée par la ligne {nouveau_no_base} à {_texte_nombre(v)}"))
+                    lignes_closes.add(l["_ligne"])
+                    bilan["closes"] += 1
                 
             max_no_ligne = nouveau_no_base
             
@@ -337,7 +382,7 @@ try:
                 nouvelle_ligne["Type de prestation hors LAMal"] = str(ref_l.get("Type de prestation hors LAMal") or "")
                 nouvelle_ligne["Entité Almaval"] = str(ref_l.get("Entité Almaval") or "")
                 nouvelle_ligne["Taux d'EPT"] = _m6._parse_float(str(ref_l.get("Taux d'EPT") or "").replace(",", "."))
-                nouvelle_ligne["Notes"] = f"Posée par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} depuis la mutation {cle_mut} ({str(ligne_mut.get(COL_MUTATIONS['TYPE']) or '')}), remplace {ancienne} (ligne {ancien_no})"
+                nouvelle_ligne["Notes"] = f"Posée par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} depuis la mutation {cle_mut} ({str(ligne_mut.get(COL_MUTATIONS['TYPE']) or '')}), remplace {_texte_nombre(ancienne)} (ligne {ancien_no})"
             else:
                 objet_defaut = sig["objet"]
                 if comp == "Contribution fixe mois":
@@ -360,11 +405,16 @@ try:
                 
             if comp == "Factoring":
                 base_no = None
-                for l in remunerations.lignes:
-                    if str(l.get("Clé engagement") or "").strip() == cle_eng and est_en_vigueur(l, d_effet):
-                        if str(l.get("Base de calcul") or "").strip().lower() == "pourcentage du facturé propre" and str(l.get("Type de ligne") or "").strip().lower() == "base":
-                            base_no = str(l.get("N° de ligne") or "")
-                            break
+                for nl in lignes_a_creer:
+                    if str(nl.get("Type de ligne") or "").strip().lower() == "base" and str(nl.get("Base de calcul") or "").strip().lower() == "pourcentage du facturé propre":
+                        base_no = _entier(nl.get("N° de ligne"))
+                        break
+                if not base_no:
+                    for l in remunerations.lignes:
+                        if str(l.get("Clé engagement") or "").strip() == cle_eng and est_en_vigueur(l, d_effet):
+                            if str(l.get("Base de calcul") or "").strip().lower() == "pourcentage du facturé propre" and str(l.get("Type de ligne") or "").strip().lower() == "base":
+                                base_no = _entier(l.get("N° de ligne"))
+                                break
                 if base_no:
                     nouvelle_ligne["Rattachée à"] = base_no
                 else:
@@ -377,13 +427,17 @@ try:
             # regle C7
             if comp == "Salaire horaire %" and anciens_numeros:
                 for ancien_no in anciens_numeros:
+                    if ancien_no is None:
+                        continue
                     for l in remunerations.lignes:
                         if str(l.get("Clé engagement") or "").strip() == cle_eng and est_en_vigueur(l, d_effet):
-                            if str(l.get("Type de ligne") or "").strip().lower() == "ajustement" and str(l.get("Rattachée à") or "").strip() == ancien_no:
-                                ecr.cellule(remunerations, l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1)))
-                                notes = str(l.get("Notes") or "")
-                                ecr.cellule(remunerations, l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}")
-                                bilan["closes"] += 1
+                            if str(l.get("Type de ligne") or "").strip().lower() == "ajustement" and _entier(l.get("Rattachée à")) == ancien_no:
+                                if l["_ligne"] not in lignes_closes:
+                                    ecritures_existantes.append((l["_ligne"], "Date de fin", serial_de(d_effet - datetime.timedelta(days=1))))
+                                    notes = str(l.get("Notes") or "")
+                                    ecritures_existantes.append((l["_ligne"], "Notes", notes + f" | Close au {(d_effet - datetime.timedelta(days=1)).strftime('%d.%m.%Y')} par Moteur des mutations le {maintenant().strftime('%d.%m.%Y')} : mutation {cle_mut}"))
+                                    lignes_closes.add(l["_ligne"])
+                                    bilan["closes"] += 1
                                 
                                 max_no_ligne += 1
                                 ajust_ligne = {
@@ -404,7 +458,7 @@ try:
                                     "Pièce source": str(l.get("Pièce source") or ""),
                                     "Lien de la pièce": str(l.get("Lien de la pièce") or ""),
                                     "Saisi par": str(l.get("Saisi par") or ""),
-                                    "Date de saisie": str(l.get("Date de saisie") or ""),
+                                    "Date de saisie": l.get("Date de saisie"),
                                     "Notes": f"Report de l'ajustement sur la nouvelle base, ligne {nouveau_no_base}"
                                 }
                                 lignes_a_creer.append(ajust_ligne)
@@ -428,24 +482,28 @@ try:
             
             if lignes_libres < len(lignes_a_creer):
                 manquantes = len(lignes_a_creer) - lignes_libres
+                ecr.requetes_api(remunerations.id, remunerations.titre, [{
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": remunerations.sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": ligne_fin - 1,
+                            "endIndex": ligne_fin - 1 + manquantes
+                        },
+                        "inheritFromBefore": True
+                    }
+                }])
                 if ecr.confirmer:
-                    ecr.requetes_api(remunerations.id, remunerations.titre, [{
-                        "insertDimension": {
-                            "range": {
-                                "sheetId": remunerations.sheet_id,
-                                "dimension": "ROWS",
-                                "startIndex": ligne_fin - 1,
-                                "endIndex": ligne_fin - 1 + manquantes
-                            },
-                            "inheritFromBefore": True
-                        }
-                    }])
-                    remunerations = _m6._lire_onglet_de(ID_EFFECTIF, "Registre - Rémunérations", rafraichir=True)
+                    remunerations = _m6._lire_onglet_de(ID_EFFECTIF, "Registre - Rémunérations")
                     
+        for ligne, colonne, valeur in ecritures_existantes:
+            ecr.cellule(remunerations, ligne, colonne, valeur)
+            
+        if lignes_a_creer:
             for i, nl in enumerate(lignes_a_creer):
                 ligne_ecriture = ligne_cible + i
                 for col, val in nl.items():
-                    # Ne pas écrire dans Nom prénom, Unité, Indexation, En vigueur
+                    # Ne pas ecrire dans Nom prenom, Unite, Indexation, En vigueur
                     if col not in ("Nom prénom", "Unité", "Indexation", "En vigueur"):
                         ecr.cellule(remunerations, ligne_ecriture, col, val)
                         
