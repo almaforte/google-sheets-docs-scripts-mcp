@@ -36,6 +36,9 @@ Ce que dit chaque carte, et d'où cela vient :
   - axes et âge des patients : Registre - Profil clinique, à défaut
     Places disponibles ;
   - langues : Registre - Personnes et Places disponibles ;
+  - statut d'accueil des infirmiers (01.10.2026) : colonne « Statut
+    infirmier » de Places disponibles, Ouvert oui, Sur étude à confirmer,
+    Complet non, avec le secteur à domicile et les prises en charge ;
   - nouveaux patients (médecins et psychologues seulement) : oui si
     Places disponibles porte des places, non sinon ; « à confirmer » si la
     ligne annonce des places mais n'a pas été mise à jour depuis plus de
@@ -299,6 +302,9 @@ def _places():
     c_liens = col("Plannings publiés sur la page web personnelle")
     c_axes = [col("Axe thérapie 1"), col("Axe thérapie 2"), col("Axe thérapie complémentaire")]
     c_age, c_jusqu = col("Âge patients"), col("Jusqu'à")
+    c_statut, c_secteur = col("Statut infirmier"), col("Secteur à domicile")
+    d_soins, f_soins = col("Évaluation infirmière", visible=True), col("Activation par le mouvement", visible=True)
+    c_soins = list(range(d_soins, f_soins + 1)) if d_soins and f_soins and f_soins >= d_soins else []
     debut = col("Couple & famille", visible=True)
     fin = col("Autres compétences", visible=True)
     c_comp = list(range(debut, fin)) if debut and fin and fin > debut else []
@@ -322,6 +328,8 @@ def _places():
             "competences": [vis[c - 1] for c in c_comp if pm._meme(cel(c), "x")],
             "axes": [texte(cel(c)).strip() for c in c_axes if texte(cel(c)).strip() not in ("", "-", "x")],
             "age": cel(c_age), "jusqu": cel(c_jusqu),
+            "statut": texte(cel(c_statut)).strip(), "secteur": texte(cel(c_secteur)).strip(),
+            "soins": [vis[c - 1] for c in c_soins if pm._meme(cel(c), "x")],
         })
     total = sum(l["places"] for l in lignes)
     return lignes, total
@@ -480,6 +488,16 @@ def calculer(aujourdhui=None):
                 if medecin:
                     np = False
                 manques["sansPlacesDisponibles"].append(nom)
+        elif c == "infirmiers" and pdl:
+            # Soins infirmiers (décision d'Alberto du 01.10.2026) : pas de nombre de places, un statut tenu
+            # par l'infirmier. Ouvert, ou suivi léger seulement : oui ; Sur étude : à confirmer ; Complet : non.
+            statut = _n(pdl["statut"])
+            if statut.startswith("ouvert"):
+                np = True
+            elif statut.startswith("sur etude"):
+                ac = True
+            elif statut.startswith("complet"):
+                np = False
         conf = site.get(ini, {})
         valide = texte(conf.get("Validé par le collaborateur")).strip().lower() == "x"
         photo = texte(conf.get("Photo")).strip() if valide else ""
@@ -495,6 +513,9 @@ def calculer(aujourdhui=None):
             "p": photo, "i": "".join(x[0] for x in pm.jetons(nom)[:1] + pm.jetons(nom)[-1:]).upper(),
             "np": np, "ac": ac, "r": (pdl["liens"] if pdl and np is True else []), "ax": axes, "ag": age,
             "slug": slug, "bio": bio, "comp": (pdl["competences"] if pdl else []),
+            "st": (pdl["statut"] if pdl and c == "infirmiers" else ""),
+            "sd": (pdl["secteur"] if pdl and c == "infirmiers" else ""),
+            "so": (pdl["soins"] if pdl and c == "infirmiers" else []),
             "_tri": _n((texte(pers.get("Nom de famille d'usage")) or texte(pers.get("Nom"))) + " " + nom),
         })
     lignes.sort(key=lambda r: (CATS.index(r["c"]), r["_tri"]))
@@ -508,6 +529,11 @@ def calculer(aujourdhui=None):
         dispos.append({"cle": d["cle"], "libelle": d["libelle"],
                        "places": int(round(total_places)) if d["places"] else None,
                        "delai": m.get("delai"), "mesures": m.get("n", 0)})
+        if d["cle"] == "infirmiers":
+            # Engagement de l'équipe infirmière (01.10.2026) : toute demande a un premier contact sous deux
+            # jours ouvrables ; « ouvert » si au moins un infirmier accueille ou étudie de nouvelles demandes.
+            dispos[-1]["engagement"] = "Premier contact sous 2 jours ouvrables"
+            dispos[-1]["ouvert"] = any(r["c"] == "infirmiers" and (r["np"] is True or r["ac"]) for r in lignes)
     donnees = {"genere_le": maintenant().strftime("%d.%m.%Y %H:%M"), "source": "Almaval, registres internes",
                "specialistes": lignes, "disponibilites": dispos}
     return {"donnees": donnees, "site": site, "prop": prop, "entetes": entetes, "nbLignes": nb_lignes,
