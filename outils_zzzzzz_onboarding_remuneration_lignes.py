@@ -276,11 +276,13 @@ try:
                         lignes_a_creer.remove(ligne_factoring_creee)
                         bilan["creees"] -= 1
                     else:
+                        # la ligne du registre porte le factoring en negatif, comme la regle C6
+                        v_signe = -abs(v)
                         val_actuelle = ligne_factoring_creee.get("Valeur")
-                        if val_actuelle is None or abs(val_actuelle - v) >= 0.0005:
-                            ligne_factoring_creee["Valeur"] = v
+                        if val_actuelle is None or abs(val_actuelle - v_signe) >= 0.0005:
+                            ligne_factoring_creee["Valeur"] = v_signe
                             notes = str(ligne_factoring_creee.get("Notes") or "")
-                            ligne_factoring_creee["Notes"] = notes + f", valeur portée à {_texte_nombre(v)} par la mutation {cle_mut}"
+                            ligne_factoring_creee["Notes"] = notes + f", valeur portée à {_texte_nombre(v_signe)} par la mutation {cle_mut}"
                     continue
             
             # regle C1
