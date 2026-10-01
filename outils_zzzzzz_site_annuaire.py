@@ -414,7 +414,7 @@ def calculer(aujourdhui=None):
             sans_personne.append(l["nom"])
 
     prop, entetes, site, nb_lignes = _onglet_site()
-    retenus, ecartes = []
+    retenus, ecartes = [], []
     for ini, liste in par_personne.items():
         pers = personnes.get(ini)
         if not pers:
