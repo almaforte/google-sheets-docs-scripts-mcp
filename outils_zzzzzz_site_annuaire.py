@@ -19,7 +19,10 @@ dernier jour, pour ne plus recevoir de demandes qu'elle ne pourra suivre),
 avec une affectation en cours au service Clinique ou au Service social du
 Registre - Affectations, et dont le statut de collaboration n'est ni
 locataire (jamais référencés nulle part) ni partenaire (encadrants et
-superviseurs, qui ne font que de la formation). Une ligne « - » dans la
+superviseurs, qui ne font que de la formation), et dont l'engagement
+porte au moins une demi-journée de présence au registre (une personne
+« En cours » sans aucune demi-journée ne vient pas encore : Capozoli
+Biancarelli au 01.10.2026). Une ligne « - » dans la
 colonne « Publié sur le site » de l'onglet « Site - Annuaire »
 d'Almaval - Collaborateurs - Effectif retire quelqu'un à la main.
 
@@ -35,7 +38,8 @@ Ce que dit chaque carte, et d'où cela vient :
   - langues : Registre - Personnes et Places disponibles ;
   - nouveaux patients (médecins et psychologues seulement) : oui si
     Places disponibles porte des places, non sinon ; « à confirmer » si la
-    ligne n'a pas été mise à jour depuis plus de 30 jours ;
+    ligne annonce des places mais n'a pas été mise à jour depuis plus de
+    30 jours (un zéro reste un non, règle d'Alberto du 01.10.2026) ;
   - boutons de rendez-vous : les liens d'agenda de la colonne « Plannings
     publiés sur la page web personnelle » de Places disponibles ;
   - photo et présentation : onglet « Site - Annuaire », montrées seulement
@@ -126,6 +130,16 @@ def _actif(e, aujourdhui):
         return False
     fin = date_de(e.get("Date de fin"))
     return not (fin and fin.date() <= aujourdhui)
+
+
+def _presente(e):
+    """Vrai si l'engagement porte au moins une demi-journée de présence (lieu, Télétravail ou Itinérant)."""
+    for jour in JOURS:
+        for moment in ("matin", "après-midi"):
+            brut = _n(e.get(jour + " " + moment))
+            if brut and brut != "non travaille":
+                return True
+    return False
 
 
 def _exclu(e):
@@ -413,6 +427,9 @@ def calculer(aujourdhui=None):
         if texte(conf.get("Publié sur le site")).strip() == "-":
             ecartes.append({"initiales": ini, "raison": "retiré à la main (Publié sur le site = -)"})
             continue
+        if ini not in SPECIAUX and not _presente(e):
+            ecartes.append({"initiales": ini, "raison": "aucune demi-journée de présence au registre"})
+            continue
         retenus.append((ini, pers, e, c, poste))
 
     lignes = []
@@ -447,15 +464,16 @@ def calculer(aujourdhui=None):
         np, ac, maj = None, False, None
         if c in ("psychiatrie", "psychotherapie"):
             # Médecins : non d'office, oui seulement si des places de psychothérapie sont ouvertes.
-            # Psychologues : selon Places disponibles, « à confirmer » si la ligne a vieilli.
+            # Psychologues : selon Places disponibles ; « à confirmer » seulement si la ligne annonce
+            # des places et a vieilli ; un zéro reste un non, même ancien (Alberto, 01.10.2026).
             if pdl:
                 maj = (aujourdhui - pdl["maj"].date()).days if pdl["maj"] else None
-                if medecin:
+                if medecin or pdl["places"] <= 0:
                     np = pdl["places"] > 0
                 elif maj is None or maj > SITE["JOURS_FRAICHEUR"]:
                     ac = True
                 else:
-                    np = pdl["places"] > 0
+                    np = True
             else:
                 if medecin:
                     np = False
