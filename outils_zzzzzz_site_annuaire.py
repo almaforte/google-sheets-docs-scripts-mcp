@@ -391,6 +391,40 @@ def _delais(aujourdhui):
     return sortie
 
 
+def _delai_evaluation(aujourdhui, inis_integrative, personnes, index):
+    if not inis_integrative:
+        return {"delai": None, "n": 0}
+    socle._oublier(ID_PATIENTS, "Patients")
+    grille = socle._lire_grille(ID_PATIENTS, "Patients")
+    if not grille:
+        return {"delai": None, "n": 0}
+    entetes = [texte(e).strip() for e in grille[0]]
+    idx = {e: i for i, e in reversed(list(enumerate(entetes))) if e}
+    i_dem = idx.get("Date demande")
+    i_rdv = idx.get("Date premier rdv psychothérapie")
+    i_psy = idx.get("Psychologue psychothérapeute")
+    if i_dem is None or i_rdv is None or i_psy is None:
+        return {"delai": None, "n": 0}
+    limite = aujourdhui - datetime.timedelta(days=SITE["JOURS_DELAIS"])
+    mesures = []
+    for r in grille[1:]:
+        psy = texte(r[i_psy] if i_psy < len(r) else "")
+        if not psy:
+            continue
+        inis = pm._correspondances(psy, personnes, index)
+        if len(inis) != 1 or inis[0] not in inis_integrative:
+            continue
+        dem = date_de(r[i_dem] if i_dem < len(r) else "")
+        rdv = date_de(r[i_rdv] if i_rdv < len(r) else "")
+        if not dem or not rdv or dem.date() < limite or dem.date() > aujourdhui:
+            continue
+        ecart = (rdv.date() - dem.date()).days
+        if 0 <= ecart <= 365:
+            mesures.append(ecart)
+    delai = int(round(statistics.median(mesures))) if len(mesures) >= SITE["MIN_MESURES"] else None
+    return {"delai": delai, "n": len(mesures)}
+
+
 # ------------------------------------------------------------------ calcul
 
 def calculer(aujourdhui=None):
@@ -517,18 +551,40 @@ def calculer(aujourdhui=None):
             "sd": (pdl["secteur"] if pdl and c == "infirmiers" else ""),
             "so": (pdl["soins"] if pdl and c == "infirmiers" else []),
             "_tri": _n((texte(pers.get("Nom de famille d'usage")) or texte(pers.get("Nom"))) + " " + nom),
+            "_ini": ini,
         })
     lignes.sort(key=lambda r: (CATS.index(r["c"]), r["_tri"]))
+    
+    inis_integrative = set()
+    places_evaluation = 0
+    for r in lignes:
+        if any("integrative" in _n(a) for a in r["ax"]):
+            inis_integrative.add(r["_ini"])
+            if r["np"] is True:
+                pdl = places_par_ini.get(r["_ini"])
+                if pdl:
+                    places_evaluation += pdl["places"]
+    if places_evaluation <= 0:
+        places_evaluation = None
+
     for r in lignes:
         r.pop("_tri", None)
+        r.pop("_ini", None)
 
     delais = _delais(aujourdhui)
+    eval_delai = _delai_evaluation(aujourdhui, inis_integrative, personnes, index)
+    
     dispos = []
     for d in DISPOS:
-        m = delais.get(d["cle"], {})
-        dispos.append({"cle": d["cle"], "libelle": d["libelle"],
-                       "places": int(round(total_places)) if d["places"] else None,
-                       "delai": m.get("delai"), "mesures": m.get("n", 0)})
+        if d["cle"] == "evaluation":
+            dispos.append({"cle": d["cle"], "libelle": d["libelle"],
+                           "places": int(round(places_evaluation)) if places_evaluation is not None else None,
+                           "delai": eval_delai["delai"], "mesures": eval_delai["n"]})
+        else:
+            m = delais.get(d["cle"], {})
+            dispos.append({"cle": d["cle"], "libelle": d["libelle"],
+                           "places": int(round(total_places)) if d["places"] else None,
+                           "delai": m.get("delai"), "mesures": m.get("n", 0)})
         if d["cle"] == "infirmiers":
             # Engagement de l'équipe infirmière (01.10.2026) : toute demande a un premier contact sous deux
             # jours ouvrables ; « ouvert » si au moins un infirmier accueille ou étudie de nouvelles demandes.
