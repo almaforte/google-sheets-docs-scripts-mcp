@@ -124,9 +124,9 @@ def _journaliser(compte, requete, motif, nombre, issue):
             return "non écrit : ligne d'en-têtes introuvable"
             
         # Calculer l'horodatage (jours depuis 30.12.1899)
-        maintenant = datetime.datetime.now(zoneinfo.ZoneInfo("Europe/Zurich"))
-        origine = datetime.datetime(1899, 12, 30, tzinfo=zoneinfo.ZoneInfo("Europe/Zurich"))
-        delta = maintenant - origine
+        # Heure murale de Zurich, sans fuseau : 1899 en Europe/Zurich vaut l'heure locale moyenne (+00:34)
+        maintenant = datetime.datetime.now(zoneinfo.ZoneInfo("Europe/Zurich")).replace(tzinfo=None)
+        delta = maintenant - datetime.datetime(1899, 12, 30)
         horodatage_sheets = delta.total_seconds() / 86400.0
         
         accepte = (issue is None)
@@ -203,7 +203,7 @@ def lire_courriels(compte: str, requete: str, motif: str, max_resultats: int = 1
         return {"boite": compte_norm, "autorise": False, "refus": refus, "journal": journal_status}
         
     # 4. Plafond
-    max_resultats = max(1, min(max_resultats, PLAFOND))
+    max_resultats = max(1, min(int(max_resultats or 10), PLAFOND))
     
     try:
         gmail = _client_gmail(compte_norm)
@@ -271,7 +271,7 @@ def lire_courriels(compte: str, requete: str, motif: str, max_resultats: int = 1
             "journal": journal_status
         }
         
-    except HttpError as e:
+    except Exception as e:  # noqa: BLE001 (le refus de délégation sort en RefreshError, pas en HttpError)
         erreur_str = str(e).lower()
         if "unauthorized_client" in erreur_str or "access_denied" in erreur_str:
             raise RuntimeError(MESSAGE_DELEGATION.format(compte=compte_norm, detail=erreur_str[:300]))
