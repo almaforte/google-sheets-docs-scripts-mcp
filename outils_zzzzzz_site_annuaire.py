@@ -40,7 +40,7 @@ Ce que dit chaque carte, et d'où cela vient :
     infirmier » de Places disponibles, Ouvert oui, Sur étude à confirmer,
     Complet non, avec le secteur à domicile et les prises en charge ;
   - nouveaux patients (médecins et psychologues seulement) : oui si
-    Places disponibles porte des places, non sinon ; « à confirmer » si la
+    Places disponibles porte, non sinon ; « à confirmer » si la
     ligne annonce des places mais n'a pas été mise à jour depuis plus de
     30 jours (un zéro reste un non, règle d'Alberto du 01.10.2026) ;
   - boutons de rendez-vous : les liens d'agenda de la colonne « Plannings
@@ -305,7 +305,7 @@ def _places():
     def col(nom, visible=False):
         return p["colonne"](nom, visible=visible)
 
-    c_places, c_maj, c_online = col("Places total"), col("Mis à jour le")
+    c_places, c_maj, c_online = col("Places total"), col("Mis à jour le"), col("Online")
     c_liens = col("Plannings publiés sur la page web personnelle")
     c_axes = [col("Axe thérapie 1"), col("Axe thérapie 2"), col("Axe thérapie complémentaire")]
     c_age, c_jusqu = col("Âge patients"), col("Jusqu'à")
