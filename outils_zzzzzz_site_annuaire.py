@@ -105,7 +105,7 @@ SPECIAUX = {
 }
 DISPOS = [
     {"cle": "psychotherapie", "libelle": "Psychothérapie", "date": "Date premier rdv psychothérapie", "places": True},
-    {"cle": "evaluation", "libelle": "Évaluation diagnostique", "date": "Date rendez-vous bilan affectif", "places": False},
+    {"cle": "evaluation", "libelle": "Évaluation diagnostique en 5 séances", "date": "Date premier rdv psychothérapie", "places": True, "filtre": "integratif"},
     {"cle": "neuropsy", "libelle": "Bilans neuropsy", "date": "Date bilan neuropsy", "places": False},
     {"cle": "infirmiers", "libelle": "Suivis infirmiers", "date": "Date bilan infirmier", "places": False},
 ]
@@ -123,6 +123,10 @@ def _slug(nom):
 
 def _jour(d):
     return d.strftime("%d.%m.%Y") if d else ""
+
+
+def _cle_nom(nom):
+    return " ".join(sorted(pm.jetons(nom)))
 
 
 def _actif(e, aujourdhui):
@@ -311,6 +315,9 @@ def _places():
     debut = col("Couple & famille", visible=True)
     fin = col("Autres compétences", visible=True)
     c_comp = list(range(debut, fin)) if debut and fin and fin > debut else []
+    c_classe, c_interp = col("Titré"), col("Avec interprète")
+    ligne1 = p["grille"][0] if p["grille"] else []
+    universelles = [vis[c - 1] for c in c_comp if c - 1 < len(ligne1) and pm._meme(ligne1[c - 1], "x")]
     lignes = []
     for l in p["lignes"]:
         v = l["valeurs"]
@@ -333,9 +340,12 @@ def _places():
             "age": cel(c_age), "jusqu": cel(c_jusqu),
             "statut": texte(cel(c_statut)).strip(), "secteur": texte(cel(c_secteur)).strip(),
             "soins": [vis[c - 1] for c in c_soins if pm._meme(cel(c), "x")],
+            "classe": texte(cel(c_classe)).strip().upper(),
+            "interprete": not pm._meme(cel(c_interp), "-"),
+            "axe1": texte(cel(c_axes[0])).strip(),
         })
     total = sum(l["places"] for l in lignes)
-    return lignes, total
+    return lignes, total, universelles
 
 
 def _onglet_site():
@@ -365,7 +375,7 @@ def _graine():
         return []
 
 
-def _delais(aujourdhui):
+def _delais(aujourdhui, integratifs=None):
     socle._oublier(ID_PATIENTS, "Patients")
     grille = socle._lire_grille(ID_PATIENTS, "Patients")
     if not grille:
@@ -373,6 +383,7 @@ def _delais(aujourdhui):
     entetes = [texte(e).strip() for e in grille[0]]
     idx = {e: i for i, e in reversed(list(enumerate(entetes))) if e}
     i_dem = idx.get("Date demande")
+    i_psy = idx.get("Psychologue psychothérapeute")
     limite = aujourdhui - datetime.timedelta(days=SITE["JOURS_DELAIS"])
     sortie = {}
     for d in DISPOS:
@@ -383,6 +394,9 @@ def _delais(aujourdhui):
             continue
         for r in grille[1:]:
             dem = date_de(r[i_dem] if i_dem < len(r) else "")
+            if d.get("filtre") == "integratif":
+                if i_psy is None or _cle_nom(r[i_psy] if i_psy < len(r) else "") not in (integratifs or set()):
+                    continue
             rdv = date_de(r[i_rdv] if i_rdv < len(r) else "")
             if not dem or not rdv or dem.date() < limite or dem.date() > aujourdhui:
                 continue
@@ -404,7 +418,10 @@ def calculer(aujourdhui=None):
     for e in engagements:
         par_personne.setdefault(texte(e.get("Initiales")).strip(), []).append(e)
 
-    places, total_places = _places()
+    places, total_places, universelles = _places()
+    integratives = [l for l in places if _n(l["axe1"]).startswith("integrati")]
+    integratifs = {_cle_nom(l["nom"]) for l in integratives}
+    places_integratives = sum(l["places"] for l in integratives)
     places_par_ini, sans_personne = {}, []
     for l in places:
         inis = pm._correspondances(l["nom"], personnes, index)
@@ -502,6 +519,13 @@ def calculer(aujourdhui=None):
                 ac = True
             elif statut.startswith("complet"):
                 np = False
+        if pdl and pdl["classe"]:
+            formation = pdl["classe"] in ("J", "I", "E")
+        else:
+            formation = _n(e.get("Statut")) == "en formation"
+        comp = list(pdl["competences"]) if pdl else []
+        if formation and c in ("psychiatrie", "psychotherapie"):
+            comp = comp + [x for x in universelles if x not in comp]
         conf = site.get(ini, {})
         valide = texte(conf.get("Validé par le collaborateur")).strip().lower() == "x"
         photo = texte(conf.get("Photo")).strip() if valide else ""
@@ -516,7 +540,8 @@ def calculer(aujourdhui=None):
             "u": (SITE["FICHE_BASE"] + "?s=" + slug) if SITE["FICHE_BASE"] else fiche,
             "p": photo, "i": "".join(x[0] for x in pm.jetons(nom)[:1] + pm.jetons(nom)[-1:]).upper(),
             "np": np, "ac": ac, "r": (pdl["liens"] if pdl and np is True else []), "ax": axes, "ag": age,
-            "slug": slug, "bio": bio, "comp": (pdl["competences"] if pdl else []),
+            "slug": slug, "bio": bio, "comp": comp, "fo": bool(formation),
+            "it": (pdl["interprete"] if pdl else True),
             "st": (pdl["statut"] if pdl and c == "infirmiers" else ""),
             "sd": (pdl["secteur"] if pdl and c == "infirmiers" else ""),
             "so": (pdl["soins"] if pdl and c == "infirmiers" else []),
@@ -526,12 +551,12 @@ def calculer(aujourdhui=None):
     for r in lignes:
         r.pop("_tri", None)
 
-    delais = _delais(aujourdhui)
+    delais = _delais(aujourdhui, integratifs)
     dispos = []
     for d in DISPOS:
         m = delais.get(d["cle"], {})
         dispos.append({"cle": d["cle"], "libelle": d["libelle"],
-                       "places": int(round(total_places)) if d["places"] else None,
+                       "places": int(round(places_integratives if d["cle"] == "evaluation" else total_places)) if d["places"] else None,
                        "delai": m.get("delai"), "mesures": m.get("n", 0)})
         if d["cle"] == "infirmiers":
             # Engagement de l'équipe infirmière (01.10.2026) : toute demande a un premier contact sous deux
@@ -539,7 +564,7 @@ def calculer(aujourdhui=None):
             dispos[-1]["engagement"] = "Premier contact sous 2 jours ouvrables"
             dispos[-1]["ouvert"] = any(r["c"] == "infirmiers" and (r["np"] is True or r["ac"]) for r in lignes)
     donnees = {"genere_le": maintenant().strftime("%d.%m.%Y %H:%M"), "source": "Almaval, registres internes",
-               "specialistes": lignes, "disponibilites": dispos}
+               "specialistes": lignes, "universelles": universelles, "disponibilites": dispos}
     return {"donnees": donnees, "site": site, "prop": prop, "entetes": entetes, "nbLignes": nb_lignes,
             "retenus": retenus, "ecartes": ecartes, "manques": manques, "placesSansPersonne": sans_personne,
             "delais": delais, "personnes": personnes}
