@@ -40,7 +40,7 @@ Ce que dit chaque carte, et d'où cela vient :
     infirmier » de Places disponibles, Ouvert oui, Sur étude à confirmer,
     Complet non, avec le secteur à domicile et les prises en charge ;
   - nouveaux patients (médecins et psychologues seulement) : oui si
-    Places disponibles porte, non sinon ; « à confirmer » si la
+    Places disponibles porte des places, non sinon ; « à confirmer » si la
     ligne annonce des places mais n'a pas été mise à jour depuis plus de
     30 jours (un zéro reste un non, règle d'Alberto du 01.10.2026) ;
   - boutons de rendez-vous : les liens d'agenda de la colonne « Plannings
