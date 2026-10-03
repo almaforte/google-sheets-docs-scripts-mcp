@@ -9,7 +9,7 @@ administrative n'occupe aucun bureau, ni sur site ni a distance : elle
 n'a rien a y faire.
 
 Ce qui est lu, et ou. Registre - Affectations du classeur de l'effectif,
-colonne « Nature de l'EPT », qui vaut Administratif ou Clinique et
+colonne « Nature de l'EPT », qui vaut Admin (anciennement Administratif) ou Clinique et
 descend du referentiel des postes. Une personne est dite exclusivement
 administrative quand elle porte au moins une affectation et qu'aucune
 n'est clinique. Rien n'est ecrit nulle part : la regle se calcule a
