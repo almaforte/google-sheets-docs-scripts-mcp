@@ -636,7 +636,7 @@ def archiver_la_ligne_de_saisie(ctx, saisie, numero, motif):
     rangee[entetes_a.index(COL_MOTIF_ARCHIVAGE)] = _s(motif)
 
     libre = max(2, len(archive.grille) + 1)
-    ctx.noter(archive.titre, {"ligne": libre, "valeurs": _rangee_lisible(entetes_a, rangee)})
+    ctx.noter(archive.titre, {"valeurs": _rangee_lisible(entetes_a, rangee), "ligne": libre})
     if ctx.confirmer:
         ecrire_lignes(archive, libre, 1, [rangee])
     archive.grille.append(rangee)
@@ -901,6 +901,9 @@ def ouvrir_les_sorties_en_attente(ctx, bilan):
     rendu["sorties_ouvertes_automatiquement"] = []
     if not SORTIE67["OUVERTURE_AUTOMATIQUE"]:
         return
+    
+    appel = run_web_app.fn if hasattr(run_web_app, "fn") else run_web_app
+    
     for l in ctx.saisie().lignes:
         if not _est_date(l.get(COL["DATE_SORTIE"])):
             continue
@@ -926,13 +929,16 @@ def ouvrir_les_sorties_en_attente(ctx, bilan):
             if not ctx.confirmer:
                 payload["simuler"] = True
             
-            rep = run_web_app(URL_APPLICATION, payload, timeout=120)
+            retour = appel(URL_APPLICATION, payload=payload, timeout=120)
             
             detail = {"ligne": l["_ligne"], "initiales": _s(l.get(COL["INITIALES"])).strip()}
-            if rep.get("ok"):
-                detail["message"] = rep.get("message", "Ouverture demandée à l'Action RH")
+            reponse = retour.get("reponse") if isinstance(retour, dict) else None
+            porte = reponse.get("almadesk") if isinstance(reponse, dict) else None
+            if isinstance(porte, dict) and porte.get("ok"):
+                detail["ouverture"] = "simulée" if porte.get("simule") else "demandée à l'Action RH"
+                detail["declenche"] = bool(porte.get("declenche"))
             else:
-                detail["erreur"] = rep.get("message", "Erreur inconnue")
+                detail["erreur"] = str((reponse or {}).get("erreur") or retour.get("erreur") or retour)[:200]
                 bilan["erreurs"] += 1
         except Exception as exc:  # noqa: BLE001
             bilan["erreurs"] += 1
