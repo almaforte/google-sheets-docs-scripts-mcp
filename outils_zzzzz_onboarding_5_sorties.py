@@ -89,8 +89,11 @@ from outils_zzzzz_onboarding_0_socle import (
     CFG, CFG_MUT, COL, COL_SORTIE, COL_SUIVI, ID_EFFECTIF, ID_GESTION, Onglet, TYPE_DOSSIER, _verrou, aujourdhui,
     cellule_vide_mut, date_de, deplacer_fichier, drive, ecrire_lignes, ecrire_objet, en_jour, est_actif, fichier,
     horodatage, lire_onglet, lire_onglet_de, liste_de_texte, maintenant, meme_texte, normaliser, serial_de,
-    supprimer_lignes, texte, URL_APPLICATION,
+    supprimer_lignes, texte,
 )
+
+# Adresse de l'application d'Onboarding : clé de CFG, pas un nom du module socle (03.10.2026).
+URL_APPLICATION = CFG["URL_APPLICATION"]
 
 # ------------------------------------------------ 67 Sortie, constantes
 
