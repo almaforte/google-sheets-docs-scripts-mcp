@@ -37,7 +37,15 @@ REASSIGNATIONS.txt) :
          realignement des affectations cliniques de « Saisie - Affectations »
          a la date d'effet, puis la photo « Registre - Affectations » par
          construireLesAffectations, moteur des postes NON porte ici (point
-         d'extension PHOTO_AFFECTATIONS).
+         d'extension PHOTO_AFFECTATIONS) ;
+       - habillage de « 73 » (03.10.2026, lot D de la regie) : les composantes
+         de remuneration de la mutation closes et reposees dans « Registre -
+         Rémunérations » (lr73_poser), d'ou se calculent les colonnes resume
+         du registre des engagements.
+     Depuis le 03.10.2026 (« 13 ») : un avenant non signe attend sa signature
+     (avenant_en_attente_de_signature), les avenants de cahier des charges
+     annules sont nettoyes dans la porte des affectations (« 50 »), et un
+     report en erreur met une alerte a am.forte@ dans la file des courriels.
      La cle de mutation est celle de « 70 » (suffixes |CDC, |COR, |NOM).
 
   2. passageQuotidienDeLaSaisieDesMutations (« 23 Saisie des mutations »,
@@ -46,7 +54,8 @@ REASSIGNATIONS.txt) :
      puis reinstallation de l'onglet (en-tetes, ligne libre, menus, formats,
      largeurs, notes ; la charte de « 40 » n'est pas portee).
 
-Aucun courriel ni aucun Google Doc ne part de ces deux passages.
+Aucun Google Doc ne part de ces deux passages ; le seul courriel est l'alerte
+du passage de 3 h, deposee dans la file (envoyee par le robot courriels-rh).
 
 Le module porte aussi phraseDuChangementAv_ (« 31 »), cleDuLieuAv_ et
 phraseLisibleDuCourrielAv_ (« 34 »), et les branche sur PHRASE_LISIBLE du
@@ -61,7 +70,8 @@ d'origine (resultat).
 
 Outils : onboarding_mutations(confirmer), onboarding_saisie_mutations(confirmer).
 Pont : lieux_cycle avec le sujet « action:onboarding_mutations [confirmer] »
-et « action:onboarding_saisie_mutations [confirmer] ».
+et « action:onboarding_saisie_mutations [confirmer] » ; diagnostic sans
+ecriture : « action:onboarding_mutations remuneration=<cle de mutation> ».
 """
 
 import datetime
@@ -84,7 +94,7 @@ from outils_zzzzz_onboarding_0_socle import (
     CFG, CFG_MUT, COL, COL_JOURNAL, COL_MUT, COL_MUTATIONS, ETATS_MUT, ID_EFFECTIF, ID_GESTION, PHRASE_LISIBLE, VOC,
     _formules_en_tete, _verrou, ajouter_ligne, cellule_vide_mut, date_de, ecrire, ecrire_objet, est_actif,
     lire_onglet, lire_onglet_de, maintenant, meme_texte, memoire_lire, nombre_js, nombre_ou_nul, normaliser,
-    oublier_tout, saisie_vide, serial_de, supprimer_lignes, texte, voc_pole,
+    oublier_tout, saisie_vide, serial_de, supprimer_lignes, texte, voc_pole, mettre_en_file,
 )
 
 # ------------------------------------------------ 23 Saisie des mutations
@@ -115,7 +125,25 @@ COL_USAGE = {"NOM": "Nom d'usage", "PRENOM": "Prénom d'usage", "COMPOSE": "Nom 
 # 70 : cle des changements de nom ; 50 : cahier des charges et avenant correctif
 NOM70_TYPE = "Changement de nom"
 NOM70_SUFFIXE = "|NOM"
-MA = {"TYPE_MUTATION": "Changement du cahier des charges", "SUITE": "Cahier des charges"}
+# « 50 » : depuis le 02.10.2026 l'avenant du cahier des charges porte la suite
+# « Avenant » et se reconnait a la marque de son commentaire ; les lignes
+# anterieures gardent la suite historique « Cahier des charges ».
+MA = {"TYPE_MUTATION": "Changement du cahier des charges", "SUITE": "Cahier des charges",
+      "SUITE_AVENANT": "Avenant", "MARQUE_COMMENTAIRE": "Cahier des charges depuis Saisie - Affectations",
+      "ONGLET_PORTE": "Saisie - Affectations", "COL_NOTES": "Notes",
+      "NOTE_ATTENTE": "En attente de signature de l'avenant du ",
+      "NOTE_A_CLORE": "À clore à la signature de l'avenant du ",
+      "NOTE_A_REDATER": "À redater à la signature de l'avenant du ",
+      "NOTE_HISTORIQUE_OUVERT": "Historique ouvert jusqu'à la signature de l'avenant du ",
+      "NOTE_ANNULEE": "Annulée avec l'avenant du ",
+      "NOTE_HISTORIQUE_CONSERVE": "Historique conservé, avenant annulé du "}
+
+# « 21 » et « 22 » : la trace de la validation sur l'onglet Mutations
+COL_ENVOI = {"STATUT": "Statut de la validation"}
+STATUTS_VALIDATION = {"VALIDE": "Validé"}
+
+# « 13 » : l'alerte du passage de 3 h
+ALERTE_3H = {"DESTINATAIRE": "am.forte@almaval.ch", "TYPE": "Contrôle", "MODE": "Envoi"}
 
 # 62 : la colonne de correction, pour la charte (non portee) et le menu
 CORRECTION_SM = {"COLONNE": "Correction d'avenant", "VALEURS": ["x", "-"], "LARGEUR": 90}
@@ -559,6 +587,7 @@ class _Ecrivain:
         self.ecritures = {}
         self.requetes = {}
         self.journal = []
+        self.remunerations = []  # bilans de lr73_poser, un par mutation reportee
 
     def cle(self, onglet):
         return _nom_du_classeur(onglet.id) + " > " + onglet.titre
@@ -631,6 +660,27 @@ class _Ecrivain:
                     del ent["grille"][n - 1]
         grid = onglet.prop.get("gridProperties", {})
         grid["rowCount"] = grid.get("rowCount", 0) - len(numeros)
+
+    def inserer_lignes(self, onglet, avant, nombre):
+        """insertRowsBefore(avant, nombre) : lignes vides inserees au-dessus de
+        la ligne « avant », la mise en forme reprise de la ligne du dessus."""
+        if nombre <= 0:
+            return
+        self.noter(onglet, {"inserer_lignes_avant": avant, "nombre": nombre})
+        if self.confirmer:
+            _batch(onglet.id, [{"insertDimension": {
+                "range": {"sheetId": onglet.sheet_id, "dimension": "ROWS",
+                          "startIndex": avant - 1, "endIndex": avant - 1 + nombre},
+                "inheritFromBefore": avant > 1}}])
+            _oublier(onglet.id, onglet.titre)
+            return
+        ent = _CACHE_GRILLES.get((onglet.id, onglet.titre))
+        if ent:
+            largeur = max([len(l) for l in ent["grille"]] + [0])
+            for _ in range(nombre):
+                ent["grille"].insert(avant - 1, [""] * largeur)
+        grid = onglet.prop.get("gridProperties", {})
+        grid["rowCount"] = grid.get("rowCount", 0) + nombre
 
     def requetes_api(self, ident, titre, requetes):
         """Un batchUpdate de structure (menus, formats, largeurs, notes)."""
@@ -773,13 +823,22 @@ def _est_correction_d_avenant(motif):
     return re.match(r"^\s*correction de l.avenant", _s(motif), re.I) is not None
 
 
+def ma_est_ligne_du_cahier_des_charges(ligne_mutation):
+    """ma_estLigneDuCahierDesCharges_ (« 50 ») : type « Changement du cahier des
+    charges », suite historique « Cahier des charges » ou marque du commentaire."""
+    if not meme_texte(ligne_mutation.get(COL_MUTATIONS["TYPE"]), MA["TYPE_MUTATION"]):
+        return False
+    if meme_texte(ligne_mutation.get(COL_MUTATIONS["SUITE"]), MA["SUITE"]):
+        return True
+    return _st(ligne_mutation.get(COL_MUTATIONS["COMMENTAIRE"])).startswith(MA["MARQUE_COMMENTAIRE"])
+
+
 def cle_mutation_de(ligne_mutation):
     """cleMutationDe_ gagnante (« 70 ») : engagement|aaaamm, puis |CDC, |COR ou |NOM."""
     d = _date_ou_nulle(ligne_mutation.get(COL_MUTATIONS["DATE"]))
     cle = _s(ligne_mutation.get(COL_MUTATIONS["CLE"]))
     base = cle + "|" + _mois_de(d) if d else cle
-    if meme_texte(ligne_mutation.get(COL_MUTATIONS["TYPE"]), MA["TYPE_MUTATION"]) \
-            and meme_texte(ligne_mutation.get(COL_MUTATIONS["SUITE"]), MA["SUITE"]):
+    if ma_est_ligne_du_cahier_des_charges(ligne_mutation):
         return base + "|CDC"
     if d and _est_correction_d_avenant(ligne_mutation.get(COL_MUTATIONS["MOTIF"])):
         return base + "|COR"
@@ -1490,12 +1549,577 @@ def ac72_apres_le_report(ecr, numero_mutation):
     return bilan
 
 
+# ------------------------------------------------ 73 : les lignes de remuneration au report
+
+# « 73 Lignes de remuneration au report et a l inscription » (decision du
+# 30.09.2026) : la remuneration est composite, une ligne par composante et par
+# version dans « Registre - Rémunérations » ; les colonnes resume de
+# « Registre - Engagements » (Salaire mensuel effectif, Salaire horaire %,
+# Factoring...) sont des matricielles calculees depuis ce registre, que
+# ecrire_objet saute. Apps Script habille appliquerLigneDeMutation_ par
+# lr73_poser_ ; la nuit Python le fait ici, a l'identique, avec deux ecarts
+# voulus (03.10.2026) : les colonnes sont verifiees avant toute ecriture (Apps
+# Script s'arretait a mi-chemin sur une colonne absente), et l'ajustement
+# reporte sur une nouvelle base (regle C7) va dans la colonne de nature de
+# l'EPT qui existe, « Nature de l'EPT » ou « Destination de l'EPT ».
+
+LR73 = {"ONGLET": "Registre - Rémunérations", "PARAMETRES": "Paramètres - Rémunération",
+        "FIN_DE_MATRICE": "Ligne technique de fin de matrice", "TAUX_FACTORING": 0.02,
+        "MOTEUR": "Moteur des mutations"}
+LR73_SIGNATURES = {
+    "Salaire mensuel effectif": {"type": "Base", "objet": "Facturation propre", "finalite": "Production",
+                                 "base": "Montant fixe mensuel", "ajustement": "", "destination": "Clinique",
+                                 "sens": "Almaval verse"},
+    "Dont salaire admin mensuel versé": {"type": "Base", "objet": "Fonction administrative", "finalite": "Soutien",
+                                         "base": "Montant fixe mensuel", "ajustement": "", "destination": "Admin",
+                                         "sens": "Almaval verse"},
+    "Salaire horaire %": {"type": "Base", "objet": "Facturation propre", "finalite": "Production",
+                          "base": "Pourcentage du facturé propre", "ajustement": "", "destination": "Clinique",
+                          "sens": "Almaval verse"},
+    "Factoring": {"type": "Ajustement", "objet": "Facturation propre", "finalite": "Production",
+                  "base": "Pourcentage du facturé propre", "ajustement": "Factoring", "destination": "",
+                  "sens": "Almaval verse"},
+    "Contribution fixe mois": {"type": "Base", "objet": "Contribution aux services", "finalite": "",
+                               "base": "Montant fixe mensuel", "ajustement": "", "destination": "",
+                               "sens": "La personne verse"},
+    "Commission sur assistants": {"type": "Base", "objet": "Encadrement d'assistants", "finalite": "Encadrement",
+                                  "base": "Pourcentage du facturé des assistants encadrés", "ajustement": "",
+                                  "destination": "", "sens": "Almaval verse"},
+}
+LR73_FRACTIONS = {"Salaire horaire %", "Factoring", "Commission sur assistants"}
+LR73_ORDRE = ["Dont salaire admin mensuel versé", "Salaire mensuel effectif", "Salaire horaire %", "Factoring",
+              "Commission sur assistants", "Contribution fixe mois"]
+# colonne de l'onglet Mutations -> composante, dans l'ordre de « 73 »
+LR73_PROPRES = [("Nouveau salaire mensuel", "Salaire mensuel effectif"),
+                ("Dont salaire admin mensuel versé", "Dont salaire admin mensuel versé"),
+                ("Salaire horaire %", "Salaire horaire %"), ("Factoring", "Factoring"),
+                ("Contribution fixe mois", "Contribution fixe mois"),
+                ("Commission sur assistants", "Commission sur assistants")]
+LR73_JAMAIS = {"Nom prénom", "Unité", "Indexation", "En vigueur"}
+LR73_COLONNES_EXIGEES = ["Clé engagement", "N° de ligne", "Type de ligne", "Base de calcul",
+                         "Sens du flux de rémunération", "Ajustement", "Valeur", "Date de début", "Date de fin",
+                         "Notes", "Anomalie"]
+
+
+def _html_echappe(t):
+    return _st(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _js_str(v):
+    """String(v) de JavaScript pour une valeur de cellule."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)) and not isinstance(v, Date):
+        return nombre_js(v)
+    return texte(v)
+
+
+def _lr73_pf(v):
+    """parseFloat(v) : None pour NaN."""
+    if isinstance(v, bool) or v is None or isinstance(v, Date):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    return _parse_float(str(v))
+
+
+def _lr73_int(v):
+    """parseInt(v, 10) : None pour NaN."""
+    if isinstance(v, bool) or v is None or isinstance(v, Date):
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    m = re.match(r"^\s*([-+]?\d+)", str(v))
+    return int(m.group(1)) if m else None
+
+
+def _lr73_bas(v):
+    """String(v || '').trim().toLowerCase()."""
+    return _s(v).strip().lower()
+
+
+def _lr73_nombre(v, est_fraction, est_factoring):
+    """lr73_nombre_ : '' si illisible, 0 pour « - » ou « non », 'taux' pour le factoring coche."""
+    if v is None or v == "":
+        return ""
+    if isinstance(v, Date):
+        return ""
+    s = _js_str(v).strip().lower()
+    if s in ("-", "non"):
+        return 0
+    if s in ("x", "oui"):
+        return "taux" if est_factoring else ""
+    s = re.sub(r"['’\s]", "", s).replace(",", ".", 1)
+    pct = "%" in s
+    if pct:
+        s = s.replace("%", "", 1)
+    n = _parse_float(s)
+    if n is None:
+        return ""
+    if pct or (est_fraction and abs(n) > 1):
+        n = n / 100
+    return n
+
+
+def lr73_valeurs_de_la_mutation(ligne_mut):
+    """lr73_valeursDeLaMutation_ : les composantes portees par la mutation."""
+    valeurs = {}
+    for ligne_texte in _s(ligne_mut.get(COL_MUTATIONS["VALEURS"])).split("\n"):
+        m = re.match(r"^(.+?) > (.+?) : ([\s\S]*)$", ligne_texte)
+        if m and m.group(1).strip() == CFG_MUT["ONGLET_ENGAGEMENTS"]:
+            valeurs[m.group(2).strip()] = m.group(3).strip()
+    for col, comp in LR73_PROPRES:
+        if comp not in valeurs and col in ligne_mut and ligne_mut[col] is not None and ligne_mut[col] != "":
+            valeurs[comp] = ligne_mut[col]
+    return valeurs
+
+
+def _lr73_dest(l):
+    v = l["Nature de l'EPT"] if "Nature de l'EPT" in l else l.get("Destination de l'EPT")
+    d = _lr73_bas(v)
+    return "clinique" if d == "thérapies" else d
+
+
+def _lr73_correspond(l, sig, date_effet, avec_debut):
+    """Meme type, base, sens, nature de l'EPT et ajustement que la signature,
+    pas close avant la date d'effet (ni ouverte apres, avec avec_debut)."""
+    if _lr73_bas(l.get("Type de ligne")) != sig["type"].lower():
+        return False
+    if _lr73_bas(l.get("Base de calcul")) != sig["base"].lower():
+        return False
+    if _lr73_bas(l.get("Sens du flux de rémunération")) != sig["sens"].lower():
+        return False
+    dest = sig["destination"].lower()
+    if _lr73_dest(l) != ("clinique" if dest == "thérapies" else dest):
+        return False
+    if _lr73_bas(l.get("Ajustement")) != sig["ajustement"].lower():
+        return False
+    fin = _date_ou_nulle(l.get("Date de fin"))
+    if fin and fin < date_effet:
+        return False
+    if avec_debut:
+        deb = _date_ou_nulle(l.get("Date de début"))
+        if deb and deb > date_effet:
+            return False
+    return True
+
+
+def _lr73_en_vigueur(l, date_effet):
+    deb = _date_ou_nulle(l.get("Date de début"))
+    fin = _date_ou_nulle(l.get("Date de fin"))
+    return not (deb and deb > date_effet) and not (fin and fin < date_effet)
+
+
+def lr73_poser(ecr, cle, date_effet, valeurs, source):
+    """lr73_poser_ : clot, corrige ou cree les lignes de « Registre - Rémunérations »
+    d'un engagement a la date d'effet. Rend le bilan (closes, creees, corrigees, anomalies)."""
+    bilan = {"cle": cle, "dateEffet": date_effet.strftime("%d.%m.%Y"), "closes": 0, "creees": 0, "corrigees": 0,
+             "anomalies": []}
+    rem = _lire_onglet_de(ID_EFFECTIF, LR73["ONGLET"])
+    manquantes = [c for c in LR73_COLONNES_EXIGEES if not rem.existe(c)]
+    if manquantes:
+        bilan["anomalies"].append("Colonnes absentes de « " + LR73["ONGLET"] + " » : " + ", ".join(manquantes))
+        return bilan
+    eng = _lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_ENGAGEMENTS"])
+    engagement = next((l for l in eng.lignes if _st(l.get("Clé engagement")) == cle), None)
+    if not engagement:
+        bilan["anomalies"].append("Engagement introuvable")
+        return bilan
+
+    taux_factoring = LR73["TAUX_FACTORING"]
+    try:
+        par = _lire_onglet_de(ID_EFFECTIF, LR73["PARAMETRES"])
+        ligne_param = next((l for l in par.lignes if _st(l.get("Paramètre")) == "Taux de factoring"), None)
+        if ligne_param and _lr73_pf(ligne_param.get("Valeur")) is not None:
+            taux_factoring = _lr73_pf(ligne_param.get("Valeur"))
+    except Exception as err:  # noqa: BLE001
+        ecr.log("73 parametres de remuneration illisibles, factoring a " + nombre_js(taux_factoring) + " : " + str(err))
+
+    col_dest = "Nature de l'EPT" if rem.existe("Nature de l'EPT") else "Destination de l'EPT"
+    lignes_cle = [l for l in rem.lignes if _st(l.get("Clé engagement")) == cle]
+    max_ligne = 0
+    for l in lignes_cle:
+        n = _lr73_int(l.get("N° de ligne"))
+        if n is not None and n > max_ligne:
+            max_ligne = n
+
+    valeurs = dict(valeurs)
+    ecritures, fermetures, corrections, anomalies = [], [], [], []
+    admin_vers = None
+    aujourdhui = maintenant()
+    jour = aujourdhui.strftime("%d.%m.%Y")
+
+    def vide(x):
+        return x is None or x == ""
+
+    if vide(valeurs.get("Salaire mensuel effectif")) and not vide(valeurs.get("Dont salaire admin mensuel versé")):
+        somme = 0
+        for l in lignes_cle:
+            if (_lr73_bas(l.get("Type de ligne")) == "base" and _lr73_bas(l.get("Base de calcul")) == "montant fixe mensuel"
+                    and _lr73_bas(l.get("Sens du flux de rémunération")) == "almaval verse"
+                    and _lr73_en_vigueur(l, date_effet)):
+                val = _lr73_pf(l.get("Valeur"))
+                if val is not None:
+                    somme += val
+        valeurs["Salaire mensuel effectif"] = somme
+
+    def fermer(c, d_fin, suite=""):
+        fermetures.append({"ligne": c["_ligne"], "fin": d_fin,
+                           "notes": _s(c.get("Notes")) + " Close au " + d_fin.strftime("%d.%m.%Y") + " par "
+                           + source["moteur"] + " le " + jour + " : " + source["piece"] + suite})
+
+    for comp in LR73_ORDRE:
+        v_brut = valeurs.get(comp)
+        if vide(v_brut):
+            continue
+        v = _lr73_nombre(v_brut, comp in LR73_FRACTIONS, comp == "Factoring")
+        if v == "":
+            continue
+        sig = LR73_SIGNATURES[comp]
+        admin_val = 0
+        candidates = [l for l in lignes_cle if _lr73_correspond(l, sig, date_effet, False)]
+
+        if comp == "Dont salaire admin mensuel versé":  # regle B2
+            admin_vers = v
+        if comp == "Salaire mensuel effectif":
+            if admin_vers is not None:
+                admin_val = admin_vers
+            else:
+                admin_lignes = [l for l in lignes_cle
+                                if _lr73_correspond(l, LR73_SIGNATURES["Dont salaire admin mensuel versé"], date_effet, True)]
+                if admin_lignes:
+                    admin_val = _lr73_pf(admin_lignes[0].get("Valeur")) or 0
+            v = v - admin_val
+            if v < 0:
+                anomalies.append("Salaire mensuel effectif negatif apres deduction de la part admin")
+                continue
+        if comp == "Factoring":
+            if v == "taux":
+                v = taux_factoring
+            if v != 0:
+                v = -abs(v)
+
+        d_fin = date_effet - datetime.timedelta(days=1)
+        if v == 0:  # regle C2
+            for c in candidates:
+                deb = _date_ou_nulle(c.get("Date de début"))
+                if deb and deb > date_effet:
+                    continue
+                fermer(c, d_fin)
+            continue
+
+        deja_bon = False
+        for c in candidates:
+            deb = _date_ou_nulle(c.get("Date de début"))
+            if deb and deb > date_effet:  # regle C4
+                texte_conflit = ("Ligne future en conflit avec la mutation " + source["cleMutation"] + " du "
+                                 + date_effet.strftime("%d.%m.%Y"))
+                anomalies.append(texte_conflit)
+                ecritures.append({"ligne": c["_ligne"], "col": "Anomalie", "val": texte_conflit})
+                deja_bon = True
+                continue
+            val_c = _lr73_pf(c.get("Valeur"))
+            if val_c is not None and abs(val_c - v) < 0.0005:  # regle C3
+                deja_bon = True
+                continue
+            if deb and deb == date_effet:  # regle C5
+                corrections.append({"ligne": c["_ligne"], "val": v,
+                                    "notes": _s(c.get("Notes")) + " Valeur corrigée de " + ("NaN" if val_c is None else nombre_js(val_c))
+                                    + " à " + nombre_js(v) + " par " + source["moteur"] + " le " + jour + " : " + source["piece"]})
+                deja_bon = True
+                continue
+        if deja_bon:
+            continue
+
+        # regle C6
+        ancienne_val, ancien_num = "", ""
+        obj, fin_ = sig["objet"], sig["finalite"]
+        type_hors = ""
+        entite = engagement.get("Entité employeuse") or "Alma Valens Sàrl"
+        taux_ept = ""
+        if sig["destination"] in ("Clinique", "Thérapies"):
+            taux_ept = engagement.get("EPT clinique")
+        elif sig["destination"] == "Admin":
+            taux_ept = engagement.get("EPT admin")
+
+        rattach = ""
+        if comp == "Factoring":
+            idx = next((i for i, e in enumerate(ecritures) if e.get("nouvelle")
+                        and _lr73_bas(e["nouvelle"].get("Type de ligne")) == "ajustement"
+                        and _lr73_bas(e["nouvelle"].get("Ajustement")) == "factoring"), -1)
+            if idx != -1:
+                val_a = _lr73_pf(ecritures[idx]["nouvelle"].get("Valeur"))
+                if val_a is None or abs(val_a - v) >= 0.0005:
+                    ecritures[idx]["nouvelle"]["Valeur"] = v
+                    ecritures[idx]["nouvelle"]["Notes"] += ", valeur portee a " + nombre_js(v)
+                continue
+            base_nouvelle = [e for e in ecritures if e.get("nouvelle")
+                             and _lr73_bas(e["nouvelle"].get("Type de ligne")) == "base"
+                             and _lr73_bas(e["nouvelle"].get("Base de calcul")) == "pourcentage du facturé propre"]
+            if base_nouvelle:
+                rattach = base_nouvelle[0]["nouvelle"]["N° de ligne"]
+            else:
+                base_lignes = [l for l in lignes_cle
+                               if _lr73_correspond(l, LR73_SIGNATURES["Salaire horaire %"], date_effet, True)]
+                if not base_lignes:
+                    anomalies.append("Factoring sans base en pourcentage")
+                    continue
+                rattach = base_lignes[0].get("N° de ligne")
+
+        if comp == "Contribution fixe mois":
+            en_vigueur = [l for l in lignes_cle if _lr73_bas(l.get("Sens du flux de rémunération")) == "la personne verse"
+                          and _lr73_en_vigueur(l, date_effet)]
+            if en_vigueur:
+                obj = en_vigueur[0].get("Objet de la ligne")
+
+        nouveau_num = max_ligne + 1
+        max_ligne = nouveau_num
+        for c in candidates:
+            deb = _date_ou_nulle(c.get("Date de début"))
+            if deb and deb > date_effet:
+                continue
+            ancienne_val = c.get("Valeur")
+            ancien_num = c.get("N° de ligne")
+            obj = c.get("Objet de la ligne")
+            fin_ = c.get("Finalité")
+            type_hors = c.get("Type de prestation hors LAMal")
+            entite = c.get("Entité Almaval")
+            taux_ept = c.get("Taux d'EPT")
+            fermer(c, d_fin, ", remplacée par la ligne " + str(nouveau_num) + " à " + nombre_js(v))
+            if comp == "Salaire horaire %":  # regle C7
+                for a in lignes_cle:
+                    if _lr73_bas(a.get("Type de ligne")) != "ajustement":
+                        continue
+                    if _s(a.get("Rattachée à")).strip() != _js_str(ancien_num).strip():
+                        continue
+                    if not _lr73_en_vigueur(a, date_effet):
+                        continue
+                    fermer(a, d_fin)
+                    max_ligne += 1
+                    ecritures.append({"nouvelle": {
+                        "Clé engagement": cle, "N° de ligne": max_ligne, "Type de ligne": a.get("Type de ligne"),
+                        "Rattachée à": nouveau_num, "Objet de la ligne": a.get("Objet de la ligne"),
+                        "Finalité": a.get("Finalité"), "Base de calcul": a.get("Base de calcul"),
+                        "Ajustement": a.get("Ajustement"),
+                        "Type de prestation hors LAMal": a.get("Type de prestation hors LAMal"),
+                        "Valeur": a.get("Valeur"),
+                        col_dest: a["Nature de l'EPT"] if "Nature de l'EPT" in a else a.get("Destination de l'EPT"),
+                        "Taux d'EPT": a.get("Taux d'EPT"),
+                        "Sens du flux de rémunération": a.get("Sens du flux de rémunération"),
+                        "Entité Almaval": a.get("Entité Almaval"), "Date de début": serial_de(date_effet),
+                        "Pièce source": source["piece"], "Lien de la pièce": source["lien"],
+                        "Saisi par": source["moteur"], "Date de saisie": serial_de(aujourdhui),
+                        "Notes": "Report de l'ajustement sur la nouvelle base, ligne " + str(nouveau_num)}})
+
+        notes = ("Posée par " + source["moteur"] + " le " + jour
+                 + (" depuis la mutation " + source["cleMutation"] + " (" + _js_str(source["type"]) + ")"
+                    if source["cleMutation"] else " depuis la fiche (inscription)"))
+        if ancienne_val is not None and ancienne_val != "":
+            notes += ", remplace " + _js_str(ancienne_val) + " (ligne " + _js_str(ancien_num) + ")"
+        else:
+            notes += ", première ligne de la composante"
+        nouvelle = {
+            "Clé engagement": cle, "N° de ligne": nouveau_num, "Type de ligne": sig["type"], "Rattachée à": rattach,
+            "Objet de la ligne": obj, "Finalité": fin_, "Base de calcul": sig["base"], "Ajustement": sig["ajustement"],
+            "Type de prestation hors LAMal": type_hors, "Valeur": v, col_dest: sig["destination"],
+            "Taux d'EPT": taux_ept, "Sens du flux de rémunération": sig["sens"], "Entité Almaval": entite,
+            "Date de début": serial_de(date_effet), "Pièce source": source["piece"], "Lien de la pièce": source["lien"],
+            "Saisi par": source["moteur"], "Date de saisie": serial_de(aujourdhui), "Notes": notes}
+        essai = source.get("essai")
+        if comp == "Salaire mensuel effectif" and essai:
+            d_fin_essai = essai["fin"] - datetime.timedelta(days=1)
+            nouvelle["Valeur"] = essai["valeur"] - admin_val
+            nouvelle["Date de fin"] = serial_de(d_fin_essai)
+            nouvelle["Notes"] += ", salaire d'essai jusqu'au " + d_fin_essai.strftime("%d.%m.%Y")
+            ecritures.append({"nouvelle": nouvelle})
+            max_ligne += 1
+            pleine = dict(nouvelle)
+            pleine.pop("Date de fin", None)
+            pleine.update({"N° de ligne": max_ligne, "Valeur": v, "Date de début": serial_de(essai["fin"]),
+                           "Notes": "Salaire plein des la fin de la periode d'essai"})
+            ecritures.append({"nouvelle": pleine})
+        else:
+            ecritures.append({"nouvelle": nouvelle})
+
+    # regle C8 : la ligne libre au-dessus de la ligne technique de fin de matrice
+    def libre_et_fin(onglet):
+        libre, fin_mat = 3, -1
+        for l in reversed(onglet.lignes):
+            if not l.get("Clé engagement") and _s(l.get("Notes")).startswith(LR73["FIN_DE_MATRICE"]):
+                fin_mat = l["_ligne"]
+            if l.get("Clé engagement"):
+                libre = l["_ligne"] + 1
+                break
+        return libre, fin_mat
+
+    ligne_libre, ligne_fin = libre_et_fin(rem)
+    nb_nouvelles = len([e for e in ecritures if e.get("nouvelle")])
+    if nb_nouvelles > 0:
+        if ligne_fin == -1:
+            anomalies.append("Ligne technique de fin de matrice introuvable")
+            ecritures = [e for e in ecritures if not e.get("nouvelle")]
+        elif ligne_fin - ligne_libre < nb_nouvelles:
+            ecr.inserer_lignes(rem, ligne_fin, nb_nouvelles - (ligne_fin - ligne_libre))
+            rem = _lire_onglet_de(ID_EFFECTIF, LR73["ONGLET"])
+            ligne_libre, _fin = libre_et_fin(rem)
+
+    for f in fermetures:
+        ecr.cellule(rem, f["ligne"], "Date de fin", serial_de(f["fin"]))
+        ecr.cellule(rem, f["ligne"], "Notes", f["notes"])
+        bilan["closes"] += 1
+    for c in corrections:
+        ecr.cellule(rem, c["ligne"], "Valeur", c["val"])
+        ecr.cellule(rem, c["ligne"], "Notes", c["notes"])
+        bilan["corrigees"] += 1
+    for e in ecritures:
+        if e.get("col"):
+            ecr.cellule(rem, e["ligne"], e["col"], e["val"])
+        elif e.get("nouvelle"):
+            ecr.objet(rem, ligne_libre, {k: v for k, v in e["nouvelle"].items() if k not in LR73_JAMAIS})
+            ligne_libre += 1
+            bilan["creees"] += 1
+    bilan["anomalies"] = anomalies
+    return bilan
+
+
+def lr73_apres_le_report(ecr, numero_mutation):
+    """lr73_habillerLeReport_ : apres le report d'une mutation, ses composantes
+    de remuneration posees dans « Registre - Rémunérations »."""
+    mutations = _lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_MUTATIONS"])
+    ligne_mut = next((l for l in mutations.lignes if l["_ligne"] == numero_mutation), None)
+    if not ligne_mut:
+        return None
+    date_effet = _date_ou_nulle(ligne_mut.get(COL_MUTATIONS["DATE"]))
+    if not date_effet:
+        return None
+    valeurs = lr73_valeurs_de_la_mutation(ligne_mut)
+    cle = _s(ligne_mut.get(COL_MUTATIONS["CLE"]))
+    cle_mut = _s(ligne_mut.get(COL_MUTATIONS["CLE_MUTATION"])).strip() or cle_mutation_de(ligne_mut)
+    source = {"piece": "Mutation " + cle_mut, "lien": ligne_mut.get(COL_MUTATIONS["LIEN_AVENANT"]) or "",
+              "moteur": LR73["MOTEUR"], "cleMutation": cle_mut,
+              "type": ligne_mut.get(COL_MUTATIONS["TYPE"]) or "Entrée"}
+    bilan = lr73_poser(ecr, cle, date_effet, valeurs, source)
+    bilan["ligne"] = numero_mutation
+    bilan["cleMutation"] = cle_mut
+    bilan["composantes"] = sorted(valeurs.keys())
+    ecr.remunerations.append(bilan)
+    return bilan
+
+
+# ------------------------------------------------ 13 et 50 : signature, avenants annules
+
+def avenant_en_attente_de_signature(ligne_mutation):
+    """avenantEnAttenteDeSignature_ (« 13 », decision d'Alberto du 03.10.2026,
+    « si applica ovviamente solo dopo firmato ») : une mutation de suite
+    « Avenant » que ni la case « Contrat ou avenant signé » ni le « Statut de
+    la validation » ne disent signee attend, meme si sa date est atteinte."""
+    if not meme_texte(ligne_mutation.get(COL_MUTATIONS["SUITE"]), "Avenant"):
+        return False
+    if est_actif(ligne_mutation.get(COL_MUTATIONS["SIGNE"])):
+        return False
+    if _s(ligne_mutation.get(COL_ENVOI["STATUT"])) == STATUTS_VALIDATION["VALIDE"]:
+        return False
+    return True
+
+
+def _ma_jour_fr(d):
+    return d.strftime("%d.%m.%Y") if d else ""
+
+
+def _ma_dates_de_la_marque(note, marque):
+    """ma_datesDeLaMarque_ : les dates jj.mm.aaaa qui suivent une marque."""
+    dates = []
+    for b in _st(note).split("|"):
+        b = b.strip()
+        if not b.startswith(marque):
+            continue
+        m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", b[len(marque):].strip())
+        if m:
+            try:
+                dates.append(datetime.datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))))
+            except ValueError:
+                pass
+    return dates
+
+
+def _ma_retirer_marque(note, marque):
+    return " | ".join(b.strip() for b in _st(note).split("|") if b.strip() and b.strip() != marque.strip())
+
+
+def ma_annuler_le_cahier_des_charges(ecr, cle, date_effet, porte):
+    """ma_annulerLeCahierDesCharges_ (« 50 ») : les lignes en attente deviennent
+    « Annulée avec l'avenant du … », les autres marques sont retirees,
+    l'historique ouvert est garde."""
+    suffixe = _ma_jour_fr(date_effet)
+    bilan = {"cle": cle, "date": suffixe, "annulees": [], "marquesRetirees": []}
+    for l in porte.lignes:
+        if _ac72_texte(l.get("Clé engagement")) != cle:
+            continue
+        note = _ac72_texte(l.get(MA["COL_NOTES"]))
+        if not note:
+            continue
+        nouvelle = note
+        if MA["NOTE_ATTENTE"] + suffixe in note:
+            nouvelle = _ma_retirer_marque(nouvelle, MA["NOTE_ATTENTE"] + suffixe)
+            nouvelle = (nouvelle + " | " if nouvelle else "") + MA["NOTE_ANNULEE"] + suffixe
+            bilan["annulees"].append(l["_ligne"])
+        for m in (MA["NOTE_A_CLORE"], MA["NOTE_A_REDATER"]):
+            if m + suffixe not in nouvelle:
+                continue
+            nouvelle = _ma_retirer_marque(nouvelle, m + suffixe)
+            bilan["marquesRetirees"].append(l["_ligne"])
+        if MA["NOTE_HISTORIQUE_OUVERT"] + suffixe in nouvelle:
+            nouvelle = _ma_retirer_marque(nouvelle, MA["NOTE_HISTORIQUE_OUVERT"] + suffixe)
+            nouvelle = (nouvelle + " | " if nouvelle else "") + MA["NOTE_HISTORIQUE_CONSERVE"] + suffixe
+            bilan["marquesRetirees"].append(l["_ligne"])
+        if nouvelle != note:
+            ecr.cellule(porte, l["_ligne"], MA["COL_NOTES"], nouvelle)
+            l[MA["COL_NOTES"]] = nouvelle
+    return bilan
+
+
+def ma_nettoyer_les_avenants_annules(ecr, mutations):
+    """ma_nettoyerLesAvenantsAnnules_ (« 50 ») : chaque avenant de cahier des
+    charges « Annulée » dont la porte des affectations porte encore des
+    marques est nettoye ; sans marque restante, rien n'est ecrit."""
+    annules = [m for m in mutations.lignes
+               if _s(m.get(COL_MUTATIONS["ETAT"])) == ETATS_MUT["ANNULEE"]
+               and meme_texte(m.get(COL_MUTATIONS["SUITE"]), MA["SUITE_AVENANT"])
+               and ma_est_ligne_du_cahier_des_charges(m)]
+    if not annules:
+        return {"nettoyes": 0, "detail": []}
+    porte = _po_lire(ID_GESTION, MA["ONGLET_PORTE"])
+    porte.colonne(MA["COL_NOTES"])
+    marquees = set()
+    for l in porte.lignes:
+        note = _ac72_texte(l.get(MA["COL_NOTES"]))
+        if not note:
+            continue
+        for marque in (MA["NOTE_ATTENTE"], MA["NOTE_A_CLORE"], MA["NOTE_A_REDATER"], MA["NOTE_HISTORIQUE_OUVERT"]):
+            for d in _ma_dates_de_la_marque(note, marque):
+                marquees.add(_ac72_texte(l.get("Clé engagement")) + "|" + _ma_jour_fr(d))
+    nettoyes, detail = 0, []
+    for m in annules:
+        cle = _ac72_texte(m.get(COL_MUTATIONS["CLE"]))
+        d = _ac72_date(m.get(COL_MUTATIONS["DATE"]))
+        if not cle or not d:
+            continue
+        if cle + "|" + _ma_jour_fr(d) not in marquees:
+            continue
+        detail.append(ma_annuler_le_cahier_des_charges(ecr, cle, d, porte))
+        nettoyes += 1
+    return {"nettoyes": nettoyes, "detail": detail}
+
+
 # ------------------------------------------------ appliquerLigneDeMutation_ dans sa semantique finale
 
 def appliquer_ligne_de_mutation(ecr, numero_mutation, regles):
     """« 61 » enveloppee par « 69 » (l'enveloppe de « 52 », empreinte avant et
-    lieu principal apres, reposee sur la declaration de « 61 »), puis
-    habillee par « 72 » (realignement clinique)."""
+    lieu principal apres, reposee sur la declaration de « 61 »), habillee par
+    « 72 » (realignement clinique), puis par « 73 » (lignes de remuneration),
+    le dernier fichier charge, donc l'habillage le plus exterieur."""
     avant = {}
     try:
         avant = lt52_empreintes(_lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_ENGAGEMENTS"]))
@@ -1510,6 +2134,11 @@ def appliquer_ligne_de_mutation(ecr, numero_mutation, regles):
         ac72_apres_le_report(ecr, numero_mutation)
     except Exception as err:  # noqa: BLE001
         ecr.log("72 realignement apres mutation : " + str(err))
+    try:
+        lr73_apres_le_report(ecr, numero_mutation)
+    except Exception as err:  # noqa: BLE001
+        ecr.log("73 lignes de remuneration apres report : " + str(err))
+        ecr.remunerations.append({"ligne": numero_mutation, "erreur": str(err)})
     return resultat
 
 
@@ -1569,9 +2198,12 @@ def controler_ecarts_de_la_saisie(ecr, regles, detail=None):
 # ------------------------------------------------ passage 1 : le report des mutations echues
 
 def passage_mutations(confirmer=False, initiales=""):
-    """passageQuotidienDesMutations : report des mutations echues, puis
-    controle de la colonne « Écart avec le registre ». Sans confirmer, rien
-    n'est ecrit et le compte rendu dit cellule par cellule ce qui le serait."""
+    """passageQuotidienDesMutations (« 13 », semantique du 03.10.2026) : report
+    des mutations echues, sauf l'avenant non signe, qui attend sa signature ;
+    nettoyage des avenants de cahier des charges annules (« 50 ») ; controle
+    de la colonne « Écart avec le registre » ; alerte a am.forte@ par la file
+    des courriels si un report echoue. Sans confirmer, rien n'est ecrit et le
+    compte rendu dit cellule par cellule ce qui le serait."""
     if not _verrou.acquire(timeout=60):
         return {"moteur": "mutations", "confirme": bool(confirmer), "resultat": "Passage déjà en cours"}
     try:
@@ -1581,11 +2213,16 @@ def passage_mutations(confirmer=False, initiales=""):
         regles = regles_mutations()
         mutations = _lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_MUTATIONS"])
         limite = _fin_du_jour()
-        reportees, erreurs, lignes_reportees = 0, [], []
+        reportees, erreurs, lignes_reportees, en_attente = 0, [], [], []
         for l in mutations.lignes:
             if _s(l.get(COL_MUTATIONS["ETAT"])) != ETATS_MUT["A_APPLIQUER"]:
                 continue
             d = _date_ou_nulle(l.get(COL_MUTATIONS["DATE"]))
+            if avenant_en_attente_de_signature(l):
+                if d and d <= limite:
+                    en_attente.append({"ligne": l["_ligne"], "cleMutation": cle_mutation_de(l),
+                                       "statut": _s(l.get(COL_ENVOI["STATUT"]))})
+                continue
             if not d or d > limite:
                 continue
             try:
@@ -1594,19 +2231,60 @@ def passage_mutations(confirmer=False, initiales=""):
                 lignes_reportees.append({"ligne": l["_ligne"], "cle": _s(l.get(COL_MUTATIONS["CLE"])),
                                          "cleMutation": cle_mutation_de(l), "colonnes_reportees": n})
             except Exception as err:  # noqa: BLE001
-                erreurs.append("ligne " + str(l["_ligne"]) + " : " + str(err))
+                erreurs.append(cle_mutation_de(l) + " (ligne " + str(l["_ligne"]) + ") : " + str(err))
+        nettoyage = {"nettoyes": 0, "detail": []}
+        try:
+            nettoyage = ma_nettoyer_les_avenants_annules(ecr, _lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_MUTATIONS"]))
+        except Exception as err_nettoyage:  # noqa: BLE001
+            erreurs.append("nettoyage des avenants annulés : " + str(err_nettoyage))
         detail = {"initiales": initiales, "fiches": []} if initiales else None
         ecarts = controler_ecarts_de_la_saisie(ecr, regles, detail)
-        bilan = (str(reportees) + " mutation(s) reportée(s), " + str(ecarts) + " ligne(s) de saisie contrôlée(s)"
+        bilan = (str(reportees) + " mutation(s) reportée(s), " + str(nettoyage["nettoyes"])
+                 + " avenant(s) annulé(s) nettoyé(s), " + str(ecarts) + " ligne(s) de saisie contrôlée(s)"
+                 + (", " + str(len(en_attente)) + " avenant(s) échu(s) en attente de signature" if en_attente else "")
                  + (", erreurs : " + " | ".join(erreurs) if erreurs else ""))
-        rendu = {"moteur": "mutations", "confirme": bool(confirmer), "reportees": lignes_reportees, "erreurs": erreurs,
-                 "controlees": ecarts, "ecritures": ecr.ecritures, "file": [], "journal": ecr.journal}
+        file_ = []
+        if erreurs:
+            message = {"type": ALERTE_3H["TYPE"], "mode": ALERTE_3H["MODE"], "destinataire": ALERTE_3H["DESTINATAIRE"],
+                       "objet": "Mutations - Passage de 3 h - " + str(len(erreurs)) + " erreur(s)",
+                       "corps": "<ul>" + "".join("<li>" + _html_echappe(e) + "</li>" for e in erreurs) + "</ul>"}
+            try:
+                file_.append(mettre_en_file(message) if confirmer else mettre_en_file(message, a_sec=True))
+            except Exception as err_file:  # noqa: BLE001
+                ecr.log("Alerte de 3 h non mise en file : " + str(err_file))
+        rendu = {"moteur": "mutations", "confirme": bool(confirmer), "reportees": lignes_reportees,
+                 "en_attente_de_signature": en_attente, "remunerations": ecr.remunerations,
+                 "avenants_annules_nettoyes": nettoyage["detail"], "erreurs": erreurs, "controlees": ecarts,
+                 "ecritures": ecr.ecritures, "requetes_api": ecr.requetes, "file": file_, "journal": ecr.journal}
         if detail:
             rendu["diagnostic"] = detail["fiches"]
         rendu["resultat" if confirmer else "resultat_prevu"] = bilan
         return rendu
     finally:
         _verrou.release()
+
+
+def simuler_remuneration(cle_mutation):
+    """Diagnostic, jamais d'ecriture : ce que « 73 » poserait dans « Registre -
+    Rémunérations » pour une ligne du registre des mutations, designee par sa
+    cle de mutation (par exemple AmLa-1|202610), qu'elle soit appliquee ou non."""
+    with _verrou:
+        oublier_tout()
+        _memo_vider()
+        ecr = _Ecrivain(False)
+        mutations = _lire_onglet_de(ID_EFFECTIF, CFG_MUT["ONGLET_MUTATIONS"])
+        cible = _st(cle_mutation).strip()
+        lignes = [l for l in mutations.lignes
+                  if cle_mutation_de(l) == cible or _s(l.get(COL_MUTATIONS["CLE_MUTATION"])).strip() == cible]
+        if not lignes:
+            return {"moteur": "mutations", "confirme": False, "remuneration": cible, "resultat_prevu": "Mutation introuvable"}
+        for l in lignes:
+            lr73_apres_le_report(ecr, l["_ligne"])
+        return {"moteur": "mutations", "confirme": False, "remuneration": cible,
+                "etats": [{"ligne": l["_ligne"], "etat": _s(l.get(COL_MUTATIONS["ETAT"])),
+                           "signee": not avenant_en_attente_de_signature(l)} for l in lignes],
+                "remunerations": ecr.remunerations, "ecritures": ecr.ecritures, "journal": ecr.journal,
+                "resultat_prevu": str(len(ecr.remunerations)) + " bilan(s) de rémunération calculé(s), rien d'écrit"}
 
 
 # ------------------------------------------------ 23 : le retrait des lignes closes
@@ -1902,6 +2580,8 @@ try:
         premier = mots[0].lower() if mots else ""
         options = dict(m.split("=", 1) for m in mots[1:] if "=" in m)
         drapeaux = {m.lower() for m in mots[1:] if "=" not in m}
+        if premier == "onboarding_mutations" and options.get("remuneration"):
+            return tolerant(simuler_remuneration)(options["remuneration"])
         if premier == "onboarding_mutations":
             return pont_de_fond("mutations", drapeaux, tolerant(passage_mutations),
                                 dict(confirmer=("confirmer" in drapeaux), initiales=options.get("initiales", "")))
