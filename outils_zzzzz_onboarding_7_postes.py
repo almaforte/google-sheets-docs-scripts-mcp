@@ -151,14 +151,14 @@ CP = {
 CP_COULEURS_VALEUR = {
     "Origine": {"Saisie RH": "#fff2cc", "Moteur clinique": "#d9d2e9"},
     "État de l'engagement": {"En cours": "#d9ead3", "À venir": "#c9daf8", "Clos": "#d9d9d9"},
-    "Nature de l'EPT": {"Administratif": "#cfe2f3", "Clinique": "#d0e0e3"},
+    "Nature de l'EPT": {"Admin": "#cfe2f3", "Administratif": "#cfe2f3", "Clinique": "#d0e0e3"},
     "Contrôle": {"OK": "#d9ead3"},
     "Contrôle de l'arbre": {"OK": "#d9ead3"},
     "Porte l'encadrement clinique": {"x": "#d9ead3", "-": "#f4cccc"},
     "Conseil de direction": {"x": "#ead1dc", "-": "#f4cccc"},
     "Conseil de stratégie": {"x": "#fce5cd", "-": "#f4cccc"},
     "Actif": {"x": "#d9ead3", "-": "#f4cccc"},
-    "Destination de l'EPT": {"Support": "#c9daf8", "Thérapies": "#d0e0e3"},
+    "Destination de l'EPT": {"Soutien clinique": "#d0e0e3", "Support admin": "#c9daf8", "Support": "#c9daf8", "Thérapies": "#d0e0e3"},
 }
 
 CP_FORMATS = {
@@ -2253,8 +2253,8 @@ def _poser_la_charte_28b(p):
     familles_ref = {e: "violet" for e in ["Clé poste", "Niveau", "Chemin hiérarchique", "Contrôle de l'arbre"]}
     geo_ref = cp_poser_l_apparence(ref, familles_ref, "jaune", 2, False)
     ref.proprietes(couleur=CP["ONGLET_SAISIE"], gel_lignes=1, gel_colonnes=1)
-    cp_valider(ref, geo_ref["index"].get("Nature de l'EPT"), 2, ["Administratif", "Clinique"])
-    cp_valider(ref, geo_ref["index"].get("Destination de l'EPT"), 2, ["Support", "Thérapies"])
+    cp_valider(ref, geo_ref["index"].get("Nature de l'EPT"), 2, ["Admin", "Administratif", "Clinique"])
+    cp_valider(ref, geo_ref["index"].get("Destination de l'EPT"), 2, ["Soutien clinique", "Support admin", "Support", "Thérapies"])
     cp_valider(ref, geo_ref["index"].get("Porte l'encadrement clinique"), 2, ["x", "-"])
     cp_valider(ref, geo_ref["index"].get("Conseil de direction"), 2, ["x", "-"])
     cp_valider(ref, geo_ref["index"].get("Conseil de stratégie"), 2, ["x", "-"])
