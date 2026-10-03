@@ -231,6 +231,7 @@ ONGLET_POSTES = "Registre - Postes admin"
 # vue, et seules celles qui n'ont pas de date de fin passee.
 ONGLETS_POSTES = ("Registre - Affectations", ONGLET_POSTES)
 NATURE_ADMINISTRATIVE = "Administratif"
+NATURES_ADMINISTRATIVES = ("Administratif", "Admin")
 COLONNES_POSTES = ("Clé engagement", "Nom prénom", "Service", "Poste", "Taux")
 # Le referentiel des postes recopie dans l'Effectif : quand une ligne du
 # cahier des charges porte un sous-service (ADC, Communication...), la
@@ -612,7 +613,7 @@ def _postes_declares(sujet: str = ""):
             continue
         if i_nature is not None:
             nature = str(_cellule(ligne, i_nature)).strip()
-            if nature and _normaliser(nature) != _normaliser(NATURE_ADMINISTRATIVE):
+            if nature and _normaliser(nature) not in [_normaliser(n) for n in NATURES_ADMINISTRATIVES]:
                 continue  # affectation clinique : hors de la vue des postes admin
         if i_fin is not None and aujourdhui is not None:
             fin = _date_serie(_cellule(ligne, i_fin))
