@@ -37,17 +37,9 @@ des actions RH, pas des moteurs de nuit).
   3. Ouverture automatique des sorties (28.09.2026, en tete du passage de
      4 h 15). Une ligne de « Saisie - Collaborateurs » qui porte une « Date
      sortie », des initiales et aucun « Statut de la sortie » est ouverte
-     comme le ferait l'action RH « Ouvrir la sortie » (ouvrirSortie de
-     « 10 Sortie ») : delai de conge legal (CO 335b et 335c) ecrit dans
-     « Delai de conge legal (mois) » pour un salarie, taches du referentiel
-     « Sortie - Actions » instanciees dans « Sortie - Suivi » (jamais de
-     doublon, par cle d'engagement puis par initiales), « Statut de la
-     sortie » a En cours, « Sortie ouverte le », coordonnees de sortie
-     pre-remplies sans rien ecraser, et le compte rendu de l'ouverture
-     ecrit dans « Message du service ». La ligne d'essai (Nom = Essai) est
-     laissee a la chaine d'essai. Les complements de « 67 » (lettres de fin
-     en PROJET, brouillons dans rh@) restent produits par l'action RH
-     « Ouvrir la sortie », que l'on peut relancer sans doublon.
+     en appelant l'Action RH « Ouvrir la sortie » par la porte d'Onboarding
+     (03.10.2026). La ligne d'essai (Nom = Essai) est laissee a la chaine
+     d'essai.
 
   4. Conditions d'application (28.09.2026, a chaque passage, pour chaque
      sortie ouverte). La colonne « Condition d'application » de « Sortie -
@@ -87,7 +79,7 @@ Pont : lieux_cycle avec le sujet « action:onboarding_archiver_sorties
 import datetime
 import re
 
-from main import mcp, tolerant
+from main import mcp, tolerant, run_web_app
 
 import outils_lieux
 from outils_zzzzz_distributeur import Date, _batch, _batch_avec_reponse, _classeur, _executer, _lire_grille, \
@@ -97,7 +89,7 @@ from outils_zzzzz_onboarding_0_socle import (
     CFG, CFG_MUT, COL, COL_SORTIE, COL_SUIVI, ID_EFFECTIF, ID_GESTION, Onglet, TYPE_DOSSIER, _verrou, aujourdhui,
     cellule_vide_mut, date_de, deplacer_fichier, drive, ecrire_lignes, ecrire_objet, en_jour, est_actif, fichier,
     horodatage, lire_onglet, lire_onglet_de, liste_de_texte, maintenant, meme_texte, normaliser, serial_de,
-    supprimer_lignes, texte,
+    supprimer_lignes, texte, URL_APPLICATION,
 )
 
 # ------------------------------------------------ 67 Sortie, constantes
@@ -808,7 +800,10 @@ def ouvrir_la_sortie(ctx, ligne):
     """ouvrirSortie de « 10 » pour une ligne de saisie deja lue : delai legal,
     taches instanciees sans doublon, statut En cours, date d'ouverture,
     coordonnees pre-remplies, compte rendu dans « Message du service ».
-    Rend le detail de ce qui a ete fait ou serait fait."""
+    Rend le detail de ce qui a ete fait ou serait fait.
+    
+    [2026-10-03] Cette fonction n'est plus appelée. La nuit ouvre les sorties
+    en appelant l'Action RH « Ouvrir la sortie » par la porte d'Onboarding."""
     saisie = ctx.saisie()
     numero = ligne["_ligne"]
     detail = {"ligne": numero, "initiales": _s(ligne.get(COL["INITIALES"])).strip(),
@@ -916,7 +911,29 @@ def ouvrir_les_sorties_en_attente(ctx, bilan):
         if meme_texte(l.get(COL["NOM"]), "Essai"):
             continue
         try:
-            detail = ouvrir_la_sortie(ctx, l)
+            payload = {
+                "action": "almadeskEditer",
+                "onglet": "Saisie - Collaborateurs",
+                "ligne": l["_ligne"],
+                "colonne": "Action RH",
+                "valeur": "Ouvrir la sortie",
+                "empreinte": {
+                    "Initiales": _s(l.get(COL["INITIALES"])).strip(),
+                    "Clé engagement": _cle_de_sortie(l)
+                },
+                "auteur": "gestion@almaval.ch"
+            }
+            if not ctx.confirmer:
+                payload["simuler"] = True
+            
+            rep = run_web_app(URL_APPLICATION, payload, timeout=120)
+            
+            detail = {"ligne": l["_ligne"], "initiales": _s(l.get(COL["INITIALES"])).strip()}
+            if rep.get("ok"):
+                detail["message"] = rep.get("message", "Ouverture demandée à l'Action RH")
+            else:
+                detail["erreur"] = rep.get("message", "Erreur inconnue")
+                bilan["erreurs"] += 1
         except Exception as exc:  # noqa: BLE001
             bilan["erreurs"] += 1
             detail = {"ligne": l["_ligne"], "initiales": _s(l.get(COL["INITIALES"])), "erreur": str(exc)[:200]}
